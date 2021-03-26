@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/ava-labs/coreth"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ava-labs/coreth/core/types"
 	"github.com/ava-labs/coreth/params"
 	"github.com/ethereum/go-ethereum/common"
@@ -118,7 +119,7 @@ func (blockValidatorPhase0) SyntacticVerify(b *Block) error {
 
 	// Make sure the block isn't too far in the future
 	blockTimestamp := b.ethBlock.Time()
-	if maxBlockTime := uint64(b.vm.clock.Time().Add(maxFutureBlockTime).Unix()); blockTimestamp > maxBlockTime {
+	if maxBlockTime := uint64(aclock.Now().Add(maxFutureBlockTime).Unix()); blockTimestamp > maxBlockTime {
 		return fmt.Errorf("block timestamp is too far in the future: %d > allowed %d", blockTimestamp, maxBlockTime)
 	}
 	return nil
@@ -223,7 +224,7 @@ func (blockValidatorPhase1) SyntacticVerify(b *Block) error {
 
 	// Make sure the block isn't too far in the future
 	blockTimestamp := b.ethBlock.Time()
-	if maxBlockTime := uint64(b.vm.clock.Time().Add(maxFutureBlockTime).Unix()); blockTimestamp > maxBlockTime {
+	if maxBlockTime := uint64(aclock.Now().Add(maxFutureBlockTime).Unix()); blockTimestamp > maxBlockTime {
 		return fmt.Errorf("block timestamp is too far in the future: %d > allowed %d", blockTimestamp, maxBlockTime)
 	}
 	return nil

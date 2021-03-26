@@ -5,8 +5,7 @@ package evm
 
 import (
 	"fmt"
-	"github.com/ava-labs/coreth/core/aclock"
-
+	
 	"github.com/ava-labs/coreth/core/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
