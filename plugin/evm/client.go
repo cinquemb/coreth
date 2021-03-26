@@ -19,6 +19,14 @@ type Client struct {
 	requester rpc.EndpointRequester
 }
 
+// IssueBlock tries to issue a new block
+func (c *Client) IssueBlock() (*IssueBlockReply, error) {
+	//ctx := context.WithValue(context.Background(), clientContextKey{}, c)
+	res := &IssueBlockReply{}
+	err := c.requester.SendRequest("issueBlock", &IssueBlockArgs{}, res)
+	return res, err
+}
+
 // NewClient returns a Client for interacting with EVM [chain]
 func NewClient(uri, chain string, requestTimeout time.Duration) *Client {
 	return &Client{

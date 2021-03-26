@@ -44,6 +44,7 @@ import (
 	"time"
 
 	"github.com/ava-labs/coreth/accounts"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ava-labs/coreth/core/types"
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -1037,12 +1038,12 @@ type signatureData struct {
 // sign asks the card to sign a message, and returns a valid signature after
 // recovering the v value.
 func (s *Session) sign(path accounts.DerivationPath, hash []byte) ([]byte, error) {
-	startTime := time.Now()
+	startTime := aclock.Now()
 	_, err := s.derive(path)
 	if err != nil {
 		return nil, err
 	}
-	deriveTime := time.Now()
+	deriveTime := aclock.Now()
 
 	response, err := s.Channel.transmitEncrypted(claSCWallet, insSign, signP1PrecomputedHash, signP2OnlyBlock, hash)
 	if err != nil {

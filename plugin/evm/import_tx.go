@@ -8,6 +8,8 @@ import (
 	"math/big"
 
 	"github.com/ava-labs/coreth/core/state"
+	"github.com/ava-labs/coreth/core/aclock"
+
 
 	"github.com/ava-labs/avalanchego/database"
 	"github.com/ava-labs/avalanchego/ids"
@@ -193,7 +195,7 @@ func (vm *VM) newImportTx(
 	signers := [][]*crypto.PrivateKeySECP256K1R{}
 
 	importedAmount := make(map[[32]byte]uint64)
-	now := vm.clock.Unix()
+	now := uint64(aclock.Now().Unix())//vm.clock.Unix()
 	for _, utxo := range atomicUTXOs {
 		inputIntf, utxoSigners, err := kc.Spend(utxo.Out, now)
 		if err != nil {

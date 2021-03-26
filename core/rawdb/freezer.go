@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/ava-labs/coreth/params"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
@@ -341,7 +342,7 @@ func (f *freezer) freeze(db ethdb.KeyValueStore) {
 			limit = f.frozen + freezerBatchLimit
 		}
 		var (
-			start    = time.Now()
+			start    = aclock.Now()
 			first    = f.frozen
 			ancients = make([]common.Hash, 0, limit-f.frozen)
 		)

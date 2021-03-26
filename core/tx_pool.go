@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/ava-labs/coreth/core/state"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ava-labs/coreth/core/types"
 	"github.com/ava-labs/coreth/params"
 	"github.com/ethereum/go-ethereum/common"
@@ -638,7 +639,7 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 		log.Trace("Pooled new executable transaction", "hash", hash, "from", from, "to", tx.To())
 
 		// Successful promotion, bump the heartbeat
-		pool.beats[from] = time.Now()
+		pool.beats[from] = aclock.Now()
 		return old != nil, nil
 	}
 	// New transaction isn't replacing a pending one, push into queue
@@ -692,7 +693,7 @@ func (pool *TxPool) enqueueTx(hash common.Hash, tx *types.Transaction) (bool, er
 	}
 	// If we never record the heartbeat, do it right now.
 	if _, exist := pool.beats[from]; !exist {
-		pool.beats[from] = time.Now()
+		pool.beats[from] = aclock.Now()
 	}
 	return old != nil, nil
 }
@@ -746,7 +747,7 @@ func (pool *TxPool) promoteTx(addr common.Address, hash common.Hash, tx *types.T
 	pool.pendingNonces.set(addr, tx.Nonce()+1)
 
 	// Successful promotion, bump the heartbeat
-	pool.beats[addr] = time.Now()
+	pool.beats[addr] = aclock.Now()
 	return true
 }
 

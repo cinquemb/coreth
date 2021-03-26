@@ -39,6 +39,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ava-labs/coreth/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -225,7 +226,7 @@ func writeKeyFile(file string, content []byte) error {
 // keyFileName implements the naming convention for keyfiles:
 // UTC--<created_at UTC ISO8601>-<address hex>
 func keyFileName(keyAddr common.Address) string {
-	ts := time.Now().UTC()
+	ts := aclock.Now().UTC()
 	return fmt.Sprintf("UTC--%s--%s", toISO8601(ts), hex.EncodeToString(keyAddr[:]))
 }
 

@@ -41,6 +41,7 @@ import (
 	"github.com/ava-labs/coreth/accounts/scwallet"
 	"github.com/ava-labs/coreth/consensus/ethash"
 	"github.com/ava-labs/coreth/core"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ava-labs/coreth/core/types"
 	"github.com/ava-labs/coreth/core/vm"
 	"github.com/ava-labs/coreth/params"
@@ -839,7 +840,7 @@ type account struct {
 }
 
 func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides map[common.Address]account, vmCfg vm.Config, timeout time.Duration, globalGasCap uint64) (*core.ExecutionResult, error) {
-	defer func(start time.Time) { log.Debug("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
+	defer func(start time.Time) { log.Debug("Executing EVM call finished", "runtime", time.Since(start)) }(aclock.Now())
 
 	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
 	if state == nil || err != nil {
@@ -851,7 +852,7 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.Blo
 	if blkNumber, isNum := blockNrOrHash.Number(); isNum && blkNumber == rpc.PendingBlockNumber {
 		// Override header with a copy to ensure the original header is not modified
 		header = types.CopyHeader(header)
-		header.Time = uint64(time.Now().Unix())
+		header.Time = uint64(aclock.Now().Unix())
 		header.Number = new(big.Int).Add(header.Number, big.NewInt(1))
 	}
 	// Override the fields of specified contracts before execution.
@@ -926,6 +927,7 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.Blo
 
 func newRevertError(result *core.ExecutionResult) *revertError {
 	reason, errUnpack := abi.UnpackRevert(result.Revert())
+	log.Warn("Revert: %v", reason)
 	err := errors.New("execution reverted")
 	if errUnpack == nil {
 		err = fmt.Errorf("execution reverted: %v", reason)
@@ -1865,6 +1867,16 @@ type PrivateDebugAPI struct {
 // of the Ethereum service.
 func NewPrivateDebugAPI(b Backend) *PrivateDebugAPI {
 	return &PrivateDebugAPI{b: b}
+}
+
+// IncreaseTime increase the time offset for the clock used in consensus and
+// mining. It has the effect of changing the timestamp of the next mined block.
+func (api *PrivateDebugAPI) IncreaseTime(seconds uint64) (uint64, error) {
+	offset, err := aclock.AddOffset(time.Duration(seconds) * time.Second)
+	if err != nil {
+		return 0, err
+	}
+	return uint64(offset.Seconds()), nil
 }
 
 // ChaindbProperty returns leveldb properties of the key-value database.

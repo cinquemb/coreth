@@ -39,6 +39,7 @@ import (
 	"github.com/ava-labs/coreth/consensus"
 	"github.com/ava-labs/coreth/consensus/misc"
 	"github.com/ava-labs/coreth/core"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ava-labs/coreth/core/state"
 	"github.com/ava-labs/coreth/core/types"
 	"github.com/ava-labs/coreth/params"
@@ -134,7 +135,6 @@ type intervalAdjust struct {
 type MinerCallbacks struct {
 	OnSealFinish func(*types.Block) error
 	OnSealDrop   func(*types.Block)
-	OnHeaderNew  func(*types.Header)
 }
 
 // worker is the main object which takes care of submitting new work to consensus engine
@@ -357,7 +357,7 @@ func (w *worker) genBlock() {
 	w.newWorkCh <- &newWorkReq{
 		interrupt: interrupt,
 		noempty:   false,
-		timestamp: time.Now().Unix(),
+		timestamp: aclock.Now().Unix(),
 	}
 }
 
@@ -398,7 +398,7 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 		select {
 		case <-w.startCh:
 			clearPending(w.chain.CurrentBlock().NumberU64())
-			timestamp = time.Now().Unix()
+			timestamp = aclock.Now().Unix()
 			if !w.manualMining {
 				log.Trace("commit ch")
 				commit(false, commitInterruptNewHead)
@@ -406,7 +406,7 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 
 		case head := <-w.chainHeadCh:
 			clearPending(head.Block.NumberU64())
-			timestamp = time.Now().Unix()
+			timestamp = aclock.Now().Unix()
 			if !w.manualMining {
 				log.Trace("commit update")
 				commit(false, commitInterruptNewHead)
@@ -489,7 +489,7 @@ func (w *worker) mainLoop() {
 		// 	// If our mining block contains less than 2 uncle blocks,
 		// 	// add the new uncle block if valid and regenerate a mining block.
 		// 	if w.isRunning() && w.current != nil && w.current.uncles.Cardinality() < 2 {
-		// 		start := time.Now()
+		// 		start := aclock.Now()
 		// 		if err := w.commitUncle(w.current, ev.Block.Header()); err == nil {
 		// 			var uncles []*types.Header
 		// 			w.current.uncles.Each(func(item interface{}) bool {
@@ -545,7 +545,7 @@ func (w *worker) mainLoop() {
 				// submit mining work here since all empty submission will be rejected
 				// by clique. Of course the advance sealing(empty submission) is disabled.
 				if w.chainConfig.Clique != nil && w.chainConfig.Clique.Period == 0 {
-					w.commitNewWork(nil, true, time.Now().Unix())
+					w.commitNewWork(nil, true, aclock.Now().Unix())
 				}
 			}
 			atomic.AddInt32(&w.newTxs, int32(len(ev.Txs)))
@@ -916,7 +916,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	tstart := time.Now()
+	tstart := aclock.Now()
 	parent := w.chain.CurrentBlock()
 	if parent.Time() >= uint64(timestamp) {
 		//timestamp = int64(parent.Time() + 1)
@@ -926,7 +926,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	// from blocking until this chain advances to timestamp
 	// This prevents a block issued up to 30s in the future
 	// from causing an unnecessary sleep
-	// if now := time.Now().Unix(); timestamp > now+1 {
+	// if now := aclock.Now().Unix(); timestamp > now+1 {
 	// 	wait := time.Duration(timestamp-now) * time.Second
 	// 	log.Info("Mining too far in the future", "wait", common.PrettyDuration(wait))
 	// 	time.Sleep(wait)
@@ -964,9 +964,6 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 				header.Extra = []byte{} // If miner opposes, don't let it use the reserved extra-data
 			}
 		}
-	}
-	if w.minerCallbacks.OnHeaderNew != nil {
-		w.minerCallbacks.OnHeaderNew(header)
 	}
 	// Could potentially happen if starting to mine in an odd state.
 	err := w.makeCurrent(parent, header)
@@ -1066,7 +1063,7 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 			interval()
 		}
 		select {
-		case w.taskCh <- &task{receipts: receipts, state: s, block: block, createdAt: time.Now()}:
+		case w.taskCh <- &task{receipts: receipts, state: s, block: block, createdAt: aclock.Now()}:
 			w.unconfirmed.Shift(block.NumberU64() - 1)
 			log.Info("Commit new mining work", "number", block.Number(), "sealhash", w.engine.SealHash(block.Header()),
 				"uncles", len(uncles), "txs", w.current.tcount,

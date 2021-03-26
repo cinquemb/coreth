@@ -40,6 +40,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ava-labs/coreth/consensus"
 	"github.com/ava-labs/coreth/core/types"
 	"github.com/ethereum/go-ethereum/common"
@@ -311,7 +312,7 @@ func (s *remoteSealer) loop() {
 
 		case result := <-s.submitRateCh:
 			// Trace remote sealer's hash rate by submitted value.
-			s.rates[result.id] = hashrate{rate: result.rate, ping: time.Now()}
+			s.rates[result.id] = hashrate{rate: result.rate, ping: aclock.Now()}
 			close(result.done)
 
 		case req := <-s.fetchRateCh:
@@ -416,7 +417,7 @@ func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest common.Hash,
 	header.Nonce = nonce
 	header.MixDigest = mixDigest
 
-	start := time.Now()
+	start := aclock.Now()
 	if !s.noverify {
 		if err := s.ethash.verifySeal(nil, header, true); err != nil {
 			s.ethash.config.Log.Warn("Invalid proof-of-work submitted", "sealhash", sealhash, "elapsed", common.PrettyDuration(time.Since(start)), "err", err)

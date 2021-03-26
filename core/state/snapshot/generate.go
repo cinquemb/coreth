@@ -34,6 +34,7 @@ import (
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ava-labs/coreth/core/rawdb"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -121,7 +122,7 @@ func generateSnapshot(diskdb ethdb.KeyValueStore, triedb *trie.Database, cache i
 		genPending: make(chan struct{}),
 		genAbort:   make(chan chan *generatorStats),
 	}
-	go base.generate(&generatorStats{wiping: wiper, start: time.Now()})
+	go base.generate(&generatorStats{wiping: wiper, start: aclock.Now()})
 	return base
 }
 
@@ -137,7 +138,7 @@ func (dl *diskLayer) generate(stats *generatorStats) {
 		// If wiper is done, resume normal mode of operation
 		case <-stats.wiping:
 			stats.wiping = nil
-			stats.start = time.Now()
+			stats.start = aclock.Now()
 
 		// If generator was aboted during wipe, return
 		case abort := <-dl.genAbort:
@@ -165,7 +166,7 @@ func (dl *diskLayer) generate(stats *generatorStats) {
 	batch := dl.diskdb.NewBatch()
 
 	// Iterate from the previous marker and continue generating the state snapshot
-	logged := time.Now()
+	logged := aclock.Now()
 	for accIt.Next() {
 		// Retrieve the current account and flatten it into the internal format
 		accountHash := common.BytesToHash(accIt.Key)
@@ -252,7 +253,7 @@ func (dl *diskLayer) generate(stats *generatorStats) {
 		}
 		if time.Since(logged) > 8*time.Second {
 			stats.Log("Generating state snapshot", dl.root, accIt.Key)
-			logged = time.Now()
+			logged = aclock.Now()
 		}
 		// Some account processed, unmark the marker
 		accMarker = nil

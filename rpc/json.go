@@ -37,6 +37,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ava-labs/coreth/core/aclock"
 )
 
 const (
@@ -236,7 +238,7 @@ func (c *jsonCodec) writeJSON(ctx context.Context, v interface{}) error {
 
 	deadline, ok := ctx.Deadline()
 	if !ok {
-		deadline = time.Now().Add(defaultWriteTimeout)
+		deadline = aclock.Now().Add(defaultWriteTimeout)
 	}
 	c.conn.SetWriteDeadline(deadline)
 	return c.encode(v)

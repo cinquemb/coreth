@@ -38,6 +38,7 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/gorilla/websocket"
 )
@@ -235,7 +236,7 @@ func (wc *websocketCodec) pingLoop() {
 			timer.Reset(wsPingInterval)
 		case <-timer.C:
 			wc.jsonCodec.encMu.Lock()
-			wc.conn.SetWriteDeadline(time.Now().Add(wsPingWriteTimeout))
+			wc.conn.SetWriteDeadline(aclock.Now().Add(wsPingWriteTimeout))
 			wc.conn.WriteMessage(websocket.PingMessage, nil)
 			wc.jsonCodec.encMu.Unlock()
 			timer.Reset(wsPingInterval)

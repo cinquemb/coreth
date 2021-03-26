@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/steakknife/bloomfilter"
 )
@@ -231,7 +232,7 @@ func (dl *diffLayer) rebloom(origin *diskLayer) {
 
 	defer func(start time.Time) {
 		snapshotBloomIndexTimer.Update(time.Since(start))
-	}(time.Now())
+	}(aclock.Now())
 
 	// Inject the new origin that triggered the rebloom
 	dl.origin = origin

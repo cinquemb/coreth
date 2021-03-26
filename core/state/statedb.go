@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/ava-labs/coreth/core/rawdb"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ava-labs/coreth/core/state/snapshot"
 	"github.com/ava-labs/coreth/core/types"
 	"github.com/ethereum/go-ethereum/common"
@@ -240,7 +241,9 @@ func (s *StateDB) AddRefund(gas uint64) {
 func (s *StateDB) SubRefund(gas uint64) {
 	s.journal.append(refundChange{prev: s.refund})
 	if gas > s.refund {
-		panic(fmt.Sprintf("Refund counter below zero (gas: %d > refund: %d)", gas, s.refund))
+		log.Warn("Setting refund to 0", "currentRefund", s.refund, "gas", gas)
+		s.refund = 0
+		return
 	}
 	s.refund -= gas
 }
@@ -525,7 +528,7 @@ func (s *StateDB) Suicide(addr common.Address) bool {
 func (s *StateDB) updateStateObject(obj *stateObject) {
 	// Track the amount of time wasted on updating the account from the trie
 	if metrics.EnabledExpensive {
-		defer func(start time.Time) { s.AccountUpdates += time.Since(start) }(time.Now())
+		defer func(start time.Time) { s.AccountUpdates += time.Since(start) }(aclock.Now())
 	}
 	// Encode the account and update the account trie
 	addr := obj.Address()
@@ -551,7 +554,7 @@ func (s *StateDB) updateStateObject(obj *stateObject) {
 func (s *StateDB) deleteStateObject(obj *stateObject) {
 	// Track the amount of time wasted on deleting the account from the trie
 	if metrics.EnabledExpensive {
-		defer func(start time.Time) { s.AccountUpdates += time.Since(start) }(time.Now())
+		defer func(start time.Time) { s.AccountUpdates += time.Since(start) }(aclock.Now())
 	}
 	// Delete the account from the trie
 	addr := obj.Address()
@@ -586,7 +589,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 	)
 	if s.snap != nil {
 		if metrics.EnabledExpensive {
-			defer func(start time.Time) { s.SnapshotAccountReads += time.Since(start) }(time.Now())
+			defer func(start time.Time) { s.SnapshotAccountReads += time.Since(start) }(aclock.Now())
 		}
 		var acc *snapshot.Account
 		if acc, err = s.snap.Account(crypto.Keccak256Hash(addr.Bytes())); err == nil {
@@ -611,7 +614,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 	// If snapshot unavailable or reading from it failed, load from the database
 	if s.snap == nil || err != nil {
 		if metrics.EnabledExpensive {
-			defer func(start time.Time) { s.AccountReads += time.Since(start) }(time.Now())
+			defer func(start time.Time) { s.AccountReads += time.Since(start) }(aclock.Now())
 		}
 		enc, err := s.trie.TryGet(addr.Bytes())
 		if err != nil {
@@ -866,7 +869,7 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	}
 	// Track the amount of time wasted on hashing the account trie
 	if metrics.EnabledExpensive {
-		defer func(start time.Time) { s.AccountHashes += time.Since(start) }(time.Now())
+		defer func(start time.Time) { s.AccountHashes += time.Since(start) }(aclock.Now())
 	}
 	return s.trie.Hash()
 }
@@ -921,7 +924,7 @@ func (s *StateDB) Commit(deleteEmptyObjects bool) (common.Hash, error) {
 	// Write the account trie changes, measuing the amount of wasted time
 	var start time.Time
 	if metrics.EnabledExpensive {
-		start = time.Now()
+		start = aclock.Now()
 	}
 	// The onleaf func is called _serially_, so we can reuse the same account
 	// for unmarshalling every time.
@@ -941,7 +944,7 @@ func (s *StateDB) Commit(deleteEmptyObjects bool) (common.Hash, error) {
 	// If snapshotting is enabled, update the snapshot tree with this new version
 	if s.snap != nil {
 		if metrics.EnabledExpensive {
-			defer func(start time.Time) { s.SnapshotCommits += time.Since(start) }(time.Now())
+			defer func(start time.Time) { s.SnapshotCommits += time.Since(start) }(aclock.Now())
 		}
 		// Only update if there's a state transition (skip empty Clique blocks)
 		if parent := s.snap.Root(); parent != root {

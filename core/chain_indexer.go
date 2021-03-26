@@ -36,6 +36,7 @@ import (
 
 	"github.com/ava-labs/coreth/core/rawdb"
 	"github.com/ava-labs/coreth/core/types"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
@@ -334,7 +335,7 @@ func (c *ChainIndexer) updateLoop() {
 						updating = true
 						c.log.Info("Upgrading chain index", "percentage", c.storedSections*100/c.knownSections)
 					}
-					updated = time.Now()
+					updated = aclock.Now()
 				}
 				// Cache the current section count and head to allow unlocking the mutex
 				c.verifyLastHead()

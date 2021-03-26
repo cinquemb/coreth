@@ -34,6 +34,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ava-labs/coreth/core/aclock"
 	mapset "github.com/deckarep/golang-set"
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -48,14 +49,14 @@ type fileCache struct {
 // scan performs a new scan on the given directory, compares against the already
 // cached filenames, and returns file sets: creates, deletes, updates.
 func (fc *fileCache) scan(keyDir string) (mapset.Set, mapset.Set, mapset.Set, error) {
-	t0 := time.Now()
+	t0 := aclock.Now()
 
 	// List all the failes from the keystore folder
 	files, err := ioutil.ReadDir(keyDir)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	t1 := time.Now()
+	t1 := aclock.Now()
 
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
@@ -83,7 +84,7 @@ func (fc *fileCache) scan(keyDir string) (mapset.Set, mapset.Set, mapset.Set, er
 			newLastMod = modified
 		}
 	}
-	t2 := time.Now()
+	t2 := aclock.Now()
 
 	// Update the tracked files and return the three sets
 	deletes := fc.all.Difference(all)   // Deletes = previous - current
@@ -91,7 +92,7 @@ func (fc *fileCache) scan(keyDir string) (mapset.Set, mapset.Set, mapset.Set, er
 	updates := mods.Difference(creates) // Updates = modified - creates
 
 	fc.all, fc.lastMod = all, newLastMod
-	t3 := time.Now()
+	t3 := aclock.Now()
 
 	// Report on the scanning stats and return
 	log.Debug("FS scan times", "list", t1.Sub(t0), "set", t2.Sub(t1), "diff", t3.Sub(t2))

@@ -34,6 +34,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ava-labs/coreth/core/aclock"
 )
 
 const MetadataApi = "rpc"
@@ -138,7 +139,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec) {
 	if s.maximumDuration > 0 {
 		ctx = contextWithDeadline{
 			Context:  ctx,
-			deadline: time.Now().Add(s.maximumDuration),
+			deadline: aclock.Now().Add(s.maximumDuration),
 		}
 	}
 

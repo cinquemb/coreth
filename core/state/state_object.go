@@ -33,6 +33,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/metrics"
@@ -213,7 +214,7 @@ func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Has
 	)
 	if s.db.snap != nil {
 		if metrics.EnabledExpensive {
-			defer func(start time.Time) { s.db.SnapshotStorageReads += time.Since(start) }(time.Now())
+			defer func(start time.Time) { s.db.SnapshotStorageReads += time.Since(start) }(aclock.Now())
 		}
 		// If the object was destructed in *this* block (and potentially resurrected),
 		// the storage has been cleared out, and we should *not* consult the previous
@@ -229,7 +230,7 @@ func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Has
 	// If snapshot unavailable or reading from it failed, load from the database
 	if s.db.snap == nil || err != nil {
 		if metrics.EnabledExpensive {
-			defer func(start time.Time) { s.db.StorageReads += time.Since(start) }(time.Now())
+			defer func(start time.Time) { s.db.StorageReads += time.Since(start) }(aclock.Now())
 		}
 		if enc, err = s.getTrie(db).TryGet(key.Bytes()); err != nil {
 			s.setError(err)
@@ -312,7 +313,7 @@ func (s *stateObject) updateTrie(db Database) Trie {
 	}
 	// Track the amount of time wasted on updating the storge trie
 	if metrics.EnabledExpensive {
-		defer func(start time.Time) { s.db.StorageUpdates += time.Since(start) }(time.Now())
+		defer func(start time.Time) { s.db.StorageUpdates += time.Since(start) }(aclock.Now())
 	}
 	// Retrieve the snapshot storage map for the object
 	var storage map[common.Hash][]byte
@@ -360,7 +361,7 @@ func (s *stateObject) updateRoot(db Database) {
 	}
 	// Track the amount of time wasted on hashing the storge trie
 	if metrics.EnabledExpensive {
-		defer func(start time.Time) { s.db.StorageHashes += time.Since(start) }(time.Now())
+		defer func(start time.Time) { s.db.StorageHashes += time.Since(start) }(aclock.Now())
 	}
 	s.data.Root = s.trie.Hash()
 }
@@ -377,7 +378,7 @@ func (s *stateObject) CommitTrie(db Database) error {
 	}
 	// Track the amount of time wasted on committing the storge trie
 	if metrics.EnabledExpensive {
-		defer func(start time.Time) { s.db.StorageCommits += time.Since(start) }(time.Now())
+		defer func(start time.Time) { s.db.StorageCommits += time.Since(start) }(aclock.Now())
 	}
 	root, err := s.trie.Commit(nil)
 	if err == nil {

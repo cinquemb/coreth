@@ -32,10 +32,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ava-labs/coreth/core/rawdb"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
@@ -133,7 +133,7 @@ func loadSnapshot(diskdb ethdb.KeyValueStore, triedb *trie.Database, cache int, 
 		go base.generate(&generatorStats{
 			wiping:   wiper,
 			origin:   origin,
-			start:    time.Now(),
+			start:    aclock.Now(),
 			accounts: generator.Accounts,
 			slots:    generator.Slots,
 			storage:  common.StorageSize(generator.Storage),

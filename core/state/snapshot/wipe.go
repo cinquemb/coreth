@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/ava-labs/coreth/core/rawdb"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
@@ -70,7 +71,7 @@ func wipeContent(db ethdb.KeyValueStore) error {
 		return err
 	}
 	// Compact the snapshot section of the database to get rid of unused space
-	start := time.Now()
+	start := aclock.Now()
 
 	log.Info("Compacting snapshot account area ")
 	end := common.CopyBytes(rawdb.SnapshotAccountPrefix)
@@ -100,7 +101,7 @@ func wipeKeyRange(db ethdb.KeyValueStore, kind string, prefix []byte, keylen int
 		items int
 	)
 	// Iterate over the key-range and delete all of them
-	start, logged := time.Now(), time.Now()
+	start, logged := aclock.Now(), aclock.Now()
 
 	it := db.NewIterator(prefix, nil)
 	for it.Next() {
@@ -128,7 +129,7 @@ func wipeKeyRange(db ethdb.KeyValueStore, kind string, prefix []byte, keylen int
 
 			if time.Since(logged) > 8*time.Second {
 				log.Info("Deleting state snapshot leftovers", "kind", kind, "wiped", items, "elapsed", common.PrettyDuration(time.Since(start)))
-				logged = time.Now()
+				logged = aclock.Now()
 			}
 		}
 	}

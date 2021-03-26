@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/ava-labs/coreth/accounts"
+	"github.com/ava-labs/coreth/core/aclock"
 	mapset "github.com/deckarep/golang-set"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
@@ -283,7 +284,7 @@ func (ac *accountCache) scanAccounts() error {
 		return nil
 	}
 	// Process all the file diffs
-	start := time.Now()
+	start := aclock.Now()
 
 	for _, p := range creates.ToSlice() {
 		if a := readAccount(p.(string)); a != nil {
@@ -300,7 +301,7 @@ func (ac *accountCache) scanAccounts() error {
 			ac.add(*a)
 		}
 	}
-	end := time.Now()
+	end := aclock.Now()
 
 	select {
 	case ac.notify <- struct{}{}:

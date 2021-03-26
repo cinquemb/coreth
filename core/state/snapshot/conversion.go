@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ethereum/go-ethereum/ethdb/memorydb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -57,12 +58,12 @@ type (
 
 // GenerateAccountTrieRoot takes an account iterator and reproduces the root hash.
 func GenerateAccountTrieRoot(it AccountIterator) (common.Hash, error) {
-	return generateTrieRoot(it, common.Hash{}, stdGenerate, nil, &generateStats{start: time.Now()}, true)
+	return generateTrieRoot(it, common.Hash{}, stdGenerate, nil, &generateStats{start: aclock.Now()}, true)
 }
 
 // GenerateStorageTrieRoot takes a storage iterator and reproduces the root hash.
 func GenerateStorageTrieRoot(account common.Hash, it StorageIterator) (common.Hash, error) {
-	return generateTrieRoot(it, account, stdGenerate, nil, &generateStats{start: time.Now()}, true)
+	return generateTrieRoot(it, account, stdGenerate, nil, &generateStats{start: aclock.Now()}, true)
 }
 
 // VerifyState takes the whole snapshot tree as the input, traverses all the accounts
@@ -87,7 +88,7 @@ func VerifyState(snaptree *Tree, root common.Hash) error {
 			return common.Hash{}
 		}
 		return hash
-	}, &generateStats{start: time.Now()}, true)
+	}, &generateStats{start: aclock.Now()}, true)
 
 	if err != nil {
 		return err
@@ -207,7 +208,7 @@ func generateTrieRoot(it Iterator, account common.Hash, generatorFn trieGenerato
 		return result
 	}
 	var (
-		logged    = time.Now()
+		logged    = aclock.Now()
 		processed = uint64(0)
 		leaf      trieKV
 		last      common.Hash
@@ -258,7 +259,7 @@ func generateTrieRoot(it Iterator, account common.Hash, generatorFn trieGenerato
 			} else {
 				stats.progress(0, processed, account, it.Hash())
 			}
-			logged, processed = time.Now(), 0
+			logged, processed = aclock.Now(), 0
 		}
 		last = it.Hash()
 	}

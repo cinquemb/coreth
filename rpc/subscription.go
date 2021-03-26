@@ -38,7 +38,8 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-	"time"
+
+	"github.com/ava-labs/coreth/core/aclock"
 )
 
 var (
@@ -65,7 +66,7 @@ func randomIDGenerator() func() ID {
 	if _, err := crand.Read(buf); err == nil {
 		seed = int64(binary.BigEndian.Uint64(buf))
 	} else {
-		seed = int64(time.Now().Nanosecond())
+		seed = int64(aclock.Now().Nanosecond())
 	}
 
 	var (

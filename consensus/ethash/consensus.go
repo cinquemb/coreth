@@ -34,6 +34,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ava-labs/coreth/consensus"
 	"github.com/ava-labs/coreth/consensus/misc"
 	"github.com/ava-labs/coreth/core/state"
@@ -261,7 +262,7 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 	}
 	// Verify the header's timestamp
 	if !uncle {
-		if header.Time > uint64(time.Now().Add(allowedFutureBlockTime).Unix()) {
+		if header.Time > uint64(aclock.Now().Add(allowedFutureBlockTime).Unix()) {
 			return consensus.ErrFutureBlock
 		}
 	}

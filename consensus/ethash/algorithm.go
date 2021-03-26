@@ -37,6 +37,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/bitutil"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -150,7 +151,7 @@ func generateCache(dest []uint32, epoch uint64, seed []byte) {
 	// Print some debug logs to allow analysis on low end devices
 	logger := log.New("epoch", epoch)
 
-	start := time.Now()
+	start := aclock.Now()
 	defer func() {
 		elapsed := time.Since(start)
 
@@ -278,7 +279,7 @@ func generateDataset(dest []uint32, epoch uint64, cache []uint32) {
 	// Print some debug logs to allow analysis on low end devices
 	logger := log.New("epoch", epoch)
 
-	start := time.Now()
+	start := aclock.Now()
 	defer func() {
 		elapsed := time.Since(start)
 

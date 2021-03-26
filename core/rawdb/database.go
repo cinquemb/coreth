@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
 	"github.com/ethereum/go-ethereum/ethdb/memorydb"
@@ -256,8 +257,8 @@ func InspectDatabase(db ethdb.Database) error {
 
 	var (
 		count  int64
-		start  = time.Now()
-		logged = time.Now()
+		start  = aclock.Now()
+		logged = aclock.Now()
 
 		// Key-value store statistics
 		total           common.StorageSize
@@ -347,7 +348,7 @@ func InspectDatabase(db ethdb.Database) error {
 		count += 1
 		if count%1000 == 0 && time.Since(logged) > 8*time.Second {
 			log.Info("Inspecting database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
-			logged = time.Now()
+			logged = aclock.Now()
 		}
 	}
 	// Inspect append-only file store then.

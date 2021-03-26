@@ -64,6 +64,17 @@ func (s *Web3API) ClientVersion() string { return Version }
 // Sha3 returns the bytes returned by hashing [input] with Keccak256
 func (s *Web3API) Sha3(input hexutil.Bytes) hexutil.Bytes { return ethcrypto.Keccak256(input) }
 
+type IssueBlockReply struct {}
+
+type IssueBlockArgs struct {}
+
+// IssueBlock to the chain
+func (service *AvaxAPI) IssueBlock(r *http.Request, args *IssueBlockArgs, reply *IssueBlockReply) error {
+	log.Info("Issuing a new block")
+
+	return service.vm.tryBlockGen()
+}
+
 // GetAcceptedFrontReply defines the reply that will be sent from the
 // GetAcceptedFront API call
 type GetAcceptedFrontReply struct {

@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -115,7 +116,7 @@ func newTransaction(nonce uint64, to *common.Address, amount *big.Int, gasLimit 
 	}
 	return &Transaction{
 		data: d,
-		time: time.Now(),
+		time: aclock.Now(),
 	}
 }
 
@@ -149,7 +150,7 @@ func (tx *Transaction) DecodeRLP(s *rlp.Stream) error {
 	err := s.Decode(&tx.data)
 	if err == nil {
 		tx.size.Store(common.StorageSize(rlp.ListSize(size)))
-		tx.time = time.Now()
+		tx.time = aclock.Now()
 	}
 	return err
 }
@@ -183,7 +184,7 @@ func (tx *Transaction) UnmarshalJSON(input []byte) error {
 	}
 	*tx = Transaction{
 		data: dec,
-		time: time.Now(),
+		time: aclock.Now(),
 	}
 	return nil
 }

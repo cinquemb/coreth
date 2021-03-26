@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/ava-labs/coreth/core"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ava-labs/coreth/core/rawdb"
 	"github.com/ava-labs/coreth/core/types"
 	"github.com/ava-labs/coreth/rpc"
@@ -240,7 +241,7 @@ func (es *EventSystem) subscribeMinedPendingLogs(crit ethereum.FilterQuery, logs
 		id:        rpc.NewID(),
 		typ:       MinedAndPendingLogsSubscription,
 		logsCrit:  crit,
-		created:   time.Now(),
+		created:   aclock.Now(),
 		logs:      logs,
 		hashes:    make(chan []common.Hash),
 		headers:   make(chan *types.Header),
@@ -257,7 +258,7 @@ func (es *EventSystem) subscribeLogs(crit ethereum.FilterQuery, logs chan []*typ
 		id:        rpc.NewID(),
 		typ:       LogsSubscription,
 		logsCrit:  crit,
-		created:   time.Now(),
+		created:   aclock.Now(),
 		logs:      logs,
 		hashes:    make(chan []common.Hash),
 		headers:   make(chan *types.Header),
@@ -274,7 +275,7 @@ func (es *EventSystem) subscribePendingLogs(crit ethereum.FilterQuery, logs chan
 		id:        rpc.NewID(),
 		typ:       PendingLogsSubscription,
 		logsCrit:  crit,
-		created:   time.Now(),
+		created:   aclock.Now(),
 		logs:      logs,
 		hashes:    make(chan []common.Hash),
 		headers:   make(chan *types.Header),
@@ -290,7 +291,7 @@ func (es *EventSystem) SubscribeNewHeads(headers chan *types.Header) *Subscripti
 	sub := &subscription{
 		id:        rpc.NewID(),
 		typ:       BlocksSubscription,
-		created:   time.Now(),
+		created:   aclock.Now(),
 		logs:      make(chan []*types.Log),
 		hashes:    make(chan []common.Hash),
 		headers:   headers,
@@ -306,7 +307,7 @@ func (es *EventSystem) SubscribePendingTxs(hashes chan []common.Hash) *Subscript
 	sub := &subscription{
 		id:        rpc.NewID(),
 		typ:       PendingTransactionsSubscription,
-		created:   time.Now(),
+		created:   aclock.Now(),
 		logs:      make(chan []*types.Log),
 		hashes:    hashes,
 		headers:   make(chan *types.Header),

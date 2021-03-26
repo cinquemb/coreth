@@ -13,6 +13,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ava-labs/coreth/consensus"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ava-labs/coreth/core/state"
 	"github.com/ava-labs/coreth/core/types"
 	"github.com/ava-labs/coreth/params"
@@ -64,7 +65,7 @@ func (self *DummyEngine) verifyHeader(chain consensus.ChainHeaderReader, header,
 		return fmt.Errorf("extra-data too long: %d > %d", len(header.Extra), params.MaximumExtraDataSize)
 	}
 	// Verify the header's timestamp
-	if header.Time > uint64(time.Now().Add(allowedFutureBlockTime).Unix()) {
+	if header.Time > uint64(aclock.Now().Add(allowedFutureBlockTime).Unix()) {
 		return consensus.ErrFutureBlock
 	}
 	//if header.Time <= parent.Time {

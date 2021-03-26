@@ -52,6 +52,7 @@ import (
 	"time"
 
 	"github.com/ava-labs/coreth/accounts"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
@@ -263,7 +264,7 @@ func (hub *Hub) refreshWallets() {
 			delete(hub.wallets, reader)
 		}
 	}
-	hub.refreshed = time.Now()
+	hub.refreshed = aclock.Now()
 	hub.stateLock.Unlock()
 
 	for _, event := range events {

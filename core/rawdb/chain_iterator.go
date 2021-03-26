@@ -31,6 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/prque"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -50,7 +51,7 @@ func InitDatabaseFromFreezer(db ethdb.Database) {
 	}
 	var (
 		batch  = db.NewBatch()
-		start  = time.Now()
+		start  = aclock.Now()
 		logged = start.Add(-7 * time.Second) // Unindex during import is fast, don't double log
 		hash   common.Hash
 	)
@@ -75,7 +76,7 @@ func InitDatabaseFromFreezer(db ethdb.Database) {
 		// If we've spent too much time already, notify the user of what we're doing
 		if time.Since(logged) > 8*time.Second {
 			log.Info("Initializing database from freezer", "total", frozen, "number", i, "hash", hash, "elapsed", common.PrettyDuration(time.Since(start)))
-			logged = time.Now()
+			logged = aclock.Now()
 		}
 	}
 	if err := batch.Write(); err != nil {
@@ -203,7 +204,7 @@ func IndexTransactions(db ethdb.Database, from uint64, to uint64) {
 	var (
 		hashesCh, abortCh = iterateTransactions(db, from, to, true)
 		batch             = db.NewBatch()
-		start             = time.Now()
+		start             = aclock.Now()
 		logged            = start.Add(-7 * time.Second)
 		//  Since we iterate in reverse, we expect the first number to come
 		// in to be [to-1]. Therefore, setting lastNum to means that the
@@ -244,7 +245,7 @@ func IndexTransactions(db ethdb.Database, from uint64, to uint64) {
 			// If we've spent too much time already, notify the user of what we're doing
 			if time.Since(logged) > 8*time.Second {
 				log.Info("Indexing transactions", "blocks", blocks, "txs", txs, "tail", lastNum, "total", to-from, "elapsed", common.PrettyDuration(time.Since(start)))
-				logged = time.Now()
+				logged = aclock.Now()
 			}
 		}
 	}
@@ -279,7 +280,7 @@ func UnindexTransactions(db ethdb.Database, from uint64, to uint64) {
 	var (
 		hashesCh, abortCh = iterateTransactions(db, from, to, false)
 		batch             = db.NewBatch()
-		start             = time.Now()
+		start             = aclock.Now()
 		logged            = start.Add(-7 * time.Second)
 	)
 	defer close(abortCh)
@@ -303,7 +304,7 @@ func UnindexTransactions(db ethdb.Database, from uint64, to uint64) {
 		// If we've spent too much time already, notify the user of what we're doing
 		if time.Since(logged) > 8*time.Second {
 			log.Info("Unindexing transactions", "blocks", blocks, "txs", txs, "total", to-from, "elapsed", common.PrettyDuration(time.Since(start)))
-			logged = time.Now()
+			logged = aclock.Now()
 		}
 	}
 	if err := batch.Write(); err != nil {

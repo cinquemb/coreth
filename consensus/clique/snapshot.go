@@ -32,6 +32,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ava-labs/coreth/core/types"
 	"github.com/ava-labs/coreth/params"
 	"github.com/ethereum/go-ethereum/common"
@@ -210,8 +211,8 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 	snap := s.copy()
 
 	var (
-		start  = time.Now()
-		logged = time.Now()
+		start  = aclock.Now()
+		logged = aclock.Now()
 	)
 	for i, header := range headers {
 		// Remove any votes on checkpoint blocks
@@ -304,7 +305,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		// If we're taking too much time (ecrecover), notify the user once a while
 		if time.Since(logged) > 8*time.Second {
 			log.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
-			logged = time.Now()
+			logged = aclock.Now()
 		}
 	}
 	if time.Since(start) > 8*time.Second {

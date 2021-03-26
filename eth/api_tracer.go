@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/ava-labs/coreth/core"
+	"github.com/ava-labs/coreth/core/aclock"
 	"github.com/ava-labs/coreth/core/rawdb"
 	"github.com/ava-labs/coreth/core/state"
 	"github.com/ava-labs/coreth/core/types"
@@ -234,7 +235,7 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 		}()
 	}
 	// Start a goroutine to feed all the blocks into the tracers
-	begin := time.Now()
+	begin := aclock.Now()
 
 	go func() {
 		var (
@@ -275,7 +276,7 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 				} else {
 					log.Info("Preparing state for chain trace", "block", number, "start", origin, "elapsed", time.Since(begin))
 				}
-				logged = time.Now()
+				logged = aclock.Now()
 			}
 			// Retrieve the next block to trace
 			block := api.eth.blockchain.GetBlockByNumber(number)
@@ -666,7 +667,7 @@ func (api *PrivateDebugAPI) computeStateDB(block *types.Block, reexec uint64) (*
 	}
 	// State was available at historical point, regenerate
 	var (
-		start  = time.Now()
+		start  = aclock.Now()
 		logged time.Time
 		proot  common.Hash
 	)
@@ -674,7 +675,7 @@ func (api *PrivateDebugAPI) computeStateDB(block *types.Block, reexec uint64) (*
 		// Print progress logs if long enough time elapsed
 		if time.Since(logged) > 8*time.Second {
 			log.Info("Regenerating historical state", "block", block.NumberU64()+1, "target", origin, "remaining", origin-block.NumberU64()-1, "elapsed", time.Since(start))
-			logged = time.Now()
+			logged = aclock.Now()
 		}
 		// Retrieve the next block to regenerate and process it
 		if block = api.eth.blockchain.GetBlockByNumber(block.NumberU64() + 1); block == nil {
