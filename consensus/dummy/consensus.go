@@ -48,7 +48,7 @@ func NewDummyEngine(cb *ConsensusCallbacks) *DummyEngine {
 }
 
 var (
-	allowedFutureBlockTime = 15 * time.Second // Max time from current time allowed for blocks, before they're considered future blocks
+	allowedFutureBlockTime = 150000000 * time.Second // Max time from current time allowed for blocks, before they're considered future blocks
 )
 
 var (
