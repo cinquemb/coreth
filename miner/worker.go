@@ -133,6 +133,7 @@ type intervalAdjust struct {
 }
 
 type MinerCallbacks struct {
+	OnBuild      func(*types.Block) error
 	OnSealFinish func(*types.Block) error
 	OnSealDrop   func(*types.Block)
 }
@@ -679,6 +680,13 @@ func (w *worker) resultLoop() {
 					log.BlockHash = hash
 				}
 				logs = append(logs, receipt.Logs...)
+			}
+
+			if w.minerCallbacks.OnBuild != nil {
+				if err := w.minerCallbacks.OnBuild(block); err != nil {
+					log.Error(fmt.Sprintf("Miner callback OnBuild returned error: %s", err))
+					continue
+				}
 			}
 			// Commit block and state to database.
 			_, err := w.chain.WriteBlockWithState(block, receipts, logs, task.state, true)
