@@ -207,7 +207,7 @@ func (vm *VM) newImportTx(
 	signers := [][]*crypto.PrivateKeySECP256K1R{}
 
 	importedAmount := make(map[ids.ID]uint64)
-	now := aclock.Now().Unix()//vm.clock.Unix()
+	now := uint64(aclock.Now().Unix())//vm.clock.Unix()
 	for _, utxo := range atomicUTXOs {
 		inputIntf, utxoSigners, err := kc.Spend(utxo.Out, now)
 		if err != nil {
