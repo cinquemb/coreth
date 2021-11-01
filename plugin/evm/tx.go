@@ -7,7 +7,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math/big"
 	"sort"
+
+	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/ava-labs/coreth/core/state"
 	"github.com/ava-labs/coreth/params"
@@ -19,9 +22,9 @@ import (
 	"github.com/ava-labs/avalanchego/utils"
 	"github.com/ava-labs/avalanchego/utils/crypto"
 	"github.com/ava-labs/avalanchego/utils/hashing"
+	"github.com/ava-labs/avalanchego/utils/wrappers"
 	"github.com/ava-labs/avalanchego/vms/components/verify"
 	"github.com/ava-labs/avalanchego/vms/secp256k1fx"
-	"github.com/ethereum/go-ethereum/common"
 )
 
 var (
@@ -33,6 +36,15 @@ var (
 	errNilOutput         = errors.New("nil output")
 	errNilInput          = errors.New("nil input")
 	errEmptyAssetID      = errors.New("empty asset ID is not valid")
+	errNilBaseFee        = errors.New("cannot calculate dynamic fee with nil baseFee")
+	errFeeOverflow       = errors.New("overflow occurred while calculating the fee")
+)
+
+// Constants for calculating the gas consumed by atomic transactions
+var (
+	TxBytesGas   uint64 = 1
+	EVMOutputGas uint64 = (common.AddressLength + wrappers.LongLen + hashing.HashLen) * TxBytesGas
+	EVMInputGas  uint64 = (common.AddressLength+wrappers.LongLen+hashing.HashLen+wrappers.LongLen)*TxBytesGas + secp256k1fx.CostPerSignature
 )
 
 // EVMOutput defines an output that is added to the EVM state created by import transactions
@@ -80,6 +92,8 @@ func (in *EVMInput) Verify() error {
 type UnsignedTx interface {
 	Initialize(unsignedBytes, signedBytes []byte)
 	ID() ids.ID
+	GasUsed() (uint64, error)
+	Burned(assetID ids.ID) (uint64, error)
 	UnsignedBytes() []byte
 	Bytes() []byte
 }
@@ -90,13 +104,16 @@ type UnsignedAtomicTx interface {
 
 	// UTXOs this tx consumes
 	InputUTXOs() ids.Set
+	// Verify attempts to verify that the transaction is well formed
+	// TODO: remove [xChainID] parameter since this is provided on [ctx]
+	Verify(xChainID ids.ID, ctx *snow.Context, rules params.Rules) error
 	// Attempts to verify this transaction with the provided state.
-	SemanticVerify(vm *VM, stx *Tx, parent *Block, rules params.Rules) TxError
+	SemanticVerify(vm *VM, stx *Tx, parent *Block, baseFee *big.Int, rules params.Rules) error
 
 	// Accept this transaction with the additionally provided state transitions.
 	Accept(ctx *snow.Context, batch database.Batch) error
 
-	EVMStateTransfer(vm *VM, state *state.StateDB) error
+	EVMStateTransfer(ctx *snow.Context, state *state.StateDB) error
 }
 
 // Tx is a signed transaction
@@ -107,8 +124,6 @@ type Tx struct {
 	// The credentials of this transaction
 	Creds []verify.Verifiable `serialize:"true" json:"credentials"`
 }
-
-// (*secp256k1fx.Credential)
 
 // Sign this transaction with the provided signers
 func (tx *Tx) Sign(c codec.Manager, signers [][]*crypto.PrivateKeySECP256K1R) error {
@@ -139,6 +154,40 @@ func (tx *Tx) Sign(c codec.Manager, signers [][]*crypto.PrivateKeySECP256K1R) er
 	}
 	tx.Initialize(unsignedBytes, signedBytes)
 	return nil
+}
+
+// BlockFeeContribution calculates how much AVAX towards the block fee contribution was paid
+// for via this transaction denominated in [avaxAssetID] with [baseFee] used to calculate the
+// cost of this transaction. This function also returns the [gasUsed] by the
+// transaction for inclusion in the [baseFee] algorithm.
+func (tx *Tx) BlockFeeContribution(avaxAssetID ids.ID, baseFee *big.Int) (*big.Int, *big.Int, error) {
+	if baseFee == nil {
+		return nil, nil, errNilBaseFee
+	}
+	if baseFee.Cmp(common.Big0) <= 0 {
+		return nil, nil, fmt.Errorf("cannot calculate tip with base fee %d <= 0", baseFee)
+	}
+	gasUsed, err := tx.GasUsed()
+	if err != nil {
+		return nil, nil, err
+	}
+	txFee, err := calculateDynamicFee(gasUsed, baseFee)
+	if err != nil {
+		return nil, nil, err
+	}
+	burned, err := tx.Burned(avaxAssetID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if txFee > burned {
+		return nil, nil, fmt.Errorf("insufficient AVAX burned (%d) to cover import tx fee (%d)", burned, txFee)
+	}
+	excessBurned := burned - txFee
+
+	// Calculate the amount of AVAX that has been burned above the required fee denominated
+	// in C-Chain native 18 decimal places
+	blockFeeContribution := new(big.Int).Mul(new(big.Int).SetUint64(excessBurned), x2cRate)
+	return blockFeeContribution, new(big.Int).SetUint64(gasUsed), nil
 }
 
 // innerSortInputsAndSigners implements sort.Interface for EVMInput
@@ -208,4 +257,25 @@ func IsSortedEVMOutputs(outputs []EVMOutput) bool {
 // and unique based on the account addresses and assetIDs
 func IsSortedAndUniqueEVMOutputs(outputs []EVMOutput) bool {
 	return utils.IsSortedAndUnique(&innerSortEVMOutputs{outputs: outputs})
+}
+
+// calculates the amount of AVAX that must be burned by an atomic transaction
+// that consumes [cost] at [baseFee].
+func calculateDynamicFee(cost uint64, baseFee *big.Int) (uint64, error) {
+	if baseFee == nil {
+		return 0, errNilBaseFee
+	}
+	bigCost := new(big.Int).SetUint64(cost)
+	fee := new(big.Int).Mul(bigCost, baseFee)
+	feeToRoundUp := new(big.Int).Add(fee, x2cRateMinus1)
+	feeInNAVAX := new(big.Int).Div(feeToRoundUp, x2cRate)
+	if !feeInNAVAX.IsUint64() {
+		// the fee is more than can fit in a uint64
+		return 0, errFeeOverflow
+	}
+	return feeInNAVAX.Uint64(), nil
+}
+
+func calcBytesCost(len int) uint64 {
+	return uint64(len) * TxBytesGas
 }

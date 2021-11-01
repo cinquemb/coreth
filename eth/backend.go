@@ -30,7 +30,6 @@ package eth
 import (
 	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 
@@ -46,14 +45,13 @@ import (
 	"github.com/ava-labs/coreth/eth/filters"
 	"github.com/ava-labs/coreth/eth/gasprice"
 	"github.com/ava-labs/coreth/eth/tracers"
+	"github.com/ava-labs/coreth/ethdb"
 	"github.com/ava-labs/coreth/internal/ethapi"
 	"github.com/ava-labs/coreth/miner"
 	"github.com/ava-labs/coreth/node"
 	"github.com/ava-labs/coreth/params"
 	"github.com/ava-labs/coreth/rpc"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/eth/downloader"
-	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -92,7 +90,6 @@ type Ethereum struct {
 	APIBackend *EthAPIBackend
 
 	miner     *miner.Miner
-	gasPrice  *big.Int
 	etherbase common.Address
 
 	networkID     uint64
@@ -107,34 +104,24 @@ type Ethereum struct {
 // initialisation of the common Ethereum object)
 func New(stack *node.Node, config *Config,
 	cb *dummy.ConsensusCallbacks,
-	mcb *miner.MinerCallbacks,
 	chainDb ethdb.Database,
 	settings Settings,
-	initGenesis bool,
+	lastAcceptedHash common.Hash,
 ) (*Ethereum, error) {
 	if chainDb == nil {
 		return nil, errors.New("chainDb cannot be nil")
 	}
-	// Ensure configuration values are compatible and sane
-	if config.SyncMode == downloader.LightSync {
-		return nil, errors.New("can't run eth.Ethereum in light sync mode")
-	}
-	if !config.SyncMode.IsValid() {
-		return nil, fmt.Errorf("invalid sync mode %d", config.SyncMode)
-	}
-	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(common.Big0) <= 0 {
-		log.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.DefaultConfig.Miner.GasPrice)
-		config.Miner.GasPrice = new(big.Int).Set(ethconfig.DefaultConfig.Miner.GasPrice)
-	}
-	if config.NoPruning && config.TrieDirtyCache > 0 {
-		// TODO: uncomment when re-enabling snapshots
-		// if config.SnapshotCache > 0 {
-		// 	config.TrieCleanCache += config.TrieDirtyCache * 3 / 5
-		// 	config.SnapshotCache += config.TrieDirtyCache * 2 / 5
-		// } else {
-		// 	config.TrieCleanCache += config.TrieDirtyCache
-		// }
-		config.TrieDirtyCache = 0
+	if !config.Pruning && config.TrieDirtyCache > 0 {
+		// If snapshots are enabled, allocate 2/5 of the TrieDirtyCache memory cap to the snapshot cache
+		if config.SnapshotCache > 0 {
+			config.TrieCleanCache += config.TrieDirtyCache * 3 / 5
+			config.SnapshotCache += config.TrieDirtyCache * 2 / 5
+		} else {
+			// If snapshots are disabled, the TrieDirtyCache will be written through to the clean cache
+			// so move the cache allocation from the dirty cache to the clean cache
+			config.TrieCleanCache += config.TrieDirtyCache
+			config.TrieDirtyCache = 0
+		}
 	}
 	log.Info("Allocated trie memory caches", "clean", common.StorageSize(config.TrieCleanCache)*1024*1024, "dirty", common.StorageSize(config.TrieDirtyCache)*1024*1024)
 
@@ -156,12 +143,10 @@ func New(stack *node.Node, config *Config,
 		engine:            dummy.NewDummyEngine(cb),
 		closeBloomHandler: make(chan struct{}),
 		networkID:         config.NetworkId,
-		gasPrice:          config.Miner.GasPrice,
 		etherbase:         config.Miner.Etherbase,
 		bloomRequests:     make(chan chan *bloombits.Retrieval),
 		bloomIndexer:      core.NewBloomIndexer(chainDb, params.BloomBitsBlocks, params.BloomConfirms),
-		// p2pServer:         stack.Server(),
-		settings: settings,
+		settings:          settings,
 	}
 
 	bcVersion := rawdb.ReadDatabaseVersion(chainDb)
@@ -173,7 +158,7 @@ func New(stack *node.Node, config *Config,
 
 	if !config.SkipBcVersionCheck {
 		if bcVersion != nil && *bcVersion > core.BlockChainVersion {
-			return nil, fmt.Errorf("database version is v%d, Geth %s only supports v%d", *bcVersion, params.VersionWithMeta, core.BlockChainVersion)
+			return nil, fmt.Errorf("database version is v%d, Coreth %s only supports v%d", *bcVersion, params.VersionWithMeta, core.BlockChainVersion)
 		} else if bcVersion == nil || *bcVersion < core.BlockChainVersion {
 			log.Warn("Upgrade blockchain database version", "from", dbVer, "to", core.BlockChainVersion)
 			rawdb.WriteDatabaseVersion(chainDb, core.BlockChainVersion)
@@ -182,36 +167,23 @@ func New(stack *node.Node, config *Config,
 	var (
 		vmConfig = vm.Config{
 			EnablePreimageRecording: config.EnablePreimageRecording,
-			EWASMInterpreter:        config.EWASMInterpreter,
-			EVMInterpreter:          config.EVMInterpreter,
 			AllowUnfinalizedQueries: config.AllowUnfinalizedQueries,
 		}
 		cacheConfig = &core.CacheConfig{
 			TrieCleanLimit: config.TrieCleanCache,
-			// Original code (requires disk):
-			// TrieCleanJournal:    stack.ResolvePath(config.TrieCleanCacheJournal),
-			TrieCleanRejournal:  config.TrieCleanCacheRejournal,
-			TrieCleanNoPrefetch: config.NoPrefetch,
-			TrieDirtyLimit:      config.TrieDirtyCache,
-			TrieDirtyDisabled:   config.NoPruning,
-			TrieTimeLimit:       config.TrieTimeout,
-			// TODO: Enable snapshots once stable (when 0 they are disabled)
-			// SnapshotLimit: config.SnapshotCache,
-			Preimages: config.Preimages,
+			TrieDirtyLimit: config.TrieDirtyCache,
+			Pruning:        config.Pruning,
+			SnapshotLimit:  config.SnapshotCache,
+			SnapshotAsync:  config.SnapshotAsync,
+			SnapshotVerify: config.SnapshotVerify,
+			Preimages:      config.Preimages,
 		}
 	)
 	var err error
-	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit, initGenesis)
+	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, lastAcceptedHash)
 	if err != nil {
 		return nil, err
 	}
-	// Original code:
-	// // Rewind the chain in case of an incompatible config upgrade.
-	// if compat, ok := genesisErr.(*params.ConfigCompatError); ok {
-	// 	log.Warn("Rewinding chain to upgrade configuration", "err", compat)
-	// 	eth.blockchain.SetHead(compat.RewindTo)
-	// 	rawdb.WriteChainConfig(chainDb, genesisHash, chainConfig)
-	// }
 	eth.bloomIndexer.Start(eth.blockchain)
 
 	// Original code (requires disk):
@@ -221,7 +193,7 @@ func New(stack *node.Node, config *Config,
 	config.TxPool.Journal = ""
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain)
 
-	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock, mcb)
+	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine)
 
 	// FIXME use node config to pass in config param on whether or not to allow unprotected
 	// currently defaults to false.
@@ -231,9 +203,6 @@ func New(stack *node.Node, config *Config,
 		log.Info("Unprotected transactions allowed")
 	}
 	gpoParams := config.GPO
-	if gpoParams.Default == nil {
-		gpoParams.Default = config.Miner.GasPrice
-	}
 	eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 
 	if err != nil {
@@ -246,19 +215,6 @@ func New(stack *node.Node, config *Config,
 	// Register the backend on the node
 	stack.RegisterAPIs(eth.APIs())
 
-	// Original code:
-	// if uncleanShutdowns, discards, err := rawdb.PushUncleanShutdownMarker(chainDb); err != nil {
-	// 	log.Error("Could not update unclean-shutdown-marker list", "error", err)
-	// } else {
-	// 	if discards > 0 {
-	// 		log.Warn("Old unclean shutdowns found", "count", discards)
-	// 	}
-	// 	for _, tstamp := range uncleanShutdowns {
-	// 		t := time.Unix(int64(tstamp), 0)
-	// 		log.Warn("Unclean shutdown detected", "booted", t,
-	// 			"age", common.PrettyAge(t))
-	// 	}
-	// }
 	return eth, nil
 }
 
@@ -330,41 +286,6 @@ func (s *Ethereum) Etherbase() (eb common.Address, err error) {
 	return common.Address{}, fmt.Errorf("etherbase must be explicitly specified")
 }
 
-// isLocalBlock checks whether the specified block is mined
-// by local miner accounts.
-//
-// We regard two types of accounts as local miner account: etherbase
-// and accounts specified via `txpool.locals` flag.
-func (s *Ethereum) isLocalBlock(block *types.Block) bool {
-	author, err := s.engine.Author(block.Header())
-	if err != nil {
-		log.Warn("Failed to retrieve block author", "number", block.NumberU64(), "hash", block.Hash(), "err", err)
-		return false
-	}
-	// Check whether the given address is etherbase.
-	s.lock.RLock()
-	etherbase := s.etherbase
-	s.lock.RUnlock()
-	if author == etherbase {
-		return true
-	}
-	// Check whether the given address is specified by `txpool.local`
-	// CLI flag.
-	for _, account := range s.config.TxPool.Locals {
-		if account == author {
-			return true
-		}
-	}
-	return false
-}
-
-// shouldPreserve checks whether we should preserve the given block
-// during the chain reorg depending on whether the author of block
-// is a local account.
-func (s *Ethereum) shouldPreserve(block *types.Block) bool {
-	return s.isLocalBlock(block)
-}
-
 // SetEtherbase sets the mining reward address.
 func (s *Ethereum) SetEtherbase(etherbase common.Address) {
 	s.lock.Lock()
@@ -383,13 +304,9 @@ func (s *Ethereum) EventMux() *event.TypeMux          { return s.eventMux }
 func (s *Ethereum) Engine() consensus.Engine          { return s.engine }
 func (s *Ethereum) ChainDb() ethdb.Database           { return s.chainDb }
 
-// FIXME remove NetVersion, IsListening, Downloader, and Synced
-func (s *Ethereum) IsListening() bool                  { return true } // Always listening
-func (s *Ethereum) NetVersion() uint64                 { return s.networkID }
-func (s *Ethereum) Downloader() *downloader.Downloader { return nil }  // s.protocolManager.downloader }
-func (s *Ethereum) Synced() bool                       { return true } // atomic.LoadUint32(&s.protocolManager.acceptTxs) == 1 }
-func (s *Ethereum) ArchiveMode() bool                  { return s.config.NoPruning }
-func (s *Ethereum) BloomIndexer() *core.ChainIndexer   { return s.bloomIndexer }
+func (s *Ethereum) NetVersion() uint64               { return s.networkID }
+func (s *Ethereum) ArchiveMode() bool                { return !s.config.Pruning }
+func (s *Ethereum) BloomIndexer() *core.ChainIndexer { return s.bloomIndexer }
 
 // Start implements node.Lifecycle, starting all internal goroutines needed by the
 // Ethereum protocol implementation.
@@ -407,8 +324,6 @@ func (s *Ethereum) Stop() error {
 	s.txPool.Stop()
 	s.blockchain.Stop()
 	s.engine.Close()
-	// Original code:
-	// rawdb.PopUncleanShutdownMarker(s.chainDb)
 	s.chainDb.Close()
 	s.eventMux.Stop()
 	return nil
@@ -416,14 +331,4 @@ func (s *Ethereum) Stop() error {
 
 func (s *Ethereum) LastAcceptedBlock() *types.Block {
 	return s.blockchain.LastAcceptedBlock()
-}
-
-// SetGasPrice sets the minimum gas price to [newGasPrice]
-// sets the price on [s], [txPool], and the gas price oracle
-func (s *Ethereum) SetGasPrice(newGasPrice *big.Int) {
-	s.lock.Lock()
-	s.gasPrice = newGasPrice
-	s.lock.Unlock()
-	s.txPool.SetGasPrice(newGasPrice)
-	s.APIBackend.gpo.SetGasPrice(newGasPrice)
 }

@@ -69,6 +69,12 @@ const (
 	maxClientSubscriptionBuffer = 20000
 )
 
+const (
+	httpScheme = "http"
+	wsScheme   = "ws"
+	ipcScheme  = "ipc"
+)
+
 // BatchElem is an element in a batch request.
 type BatchElem struct {
 	Method string
@@ -85,7 +91,7 @@ type BatchElem struct {
 // Client represents a connection to an RPC server.
 type Client struct {
 	idgen    func() ID // for subscriptions
-	isHTTP   bool
+	scheme   string    // connection type: http, ws or ipc
 	services *serviceRegistry
 
 	idCounter uint32
@@ -119,9 +125,17 @@ type clientConn struct {
 	handler *handler
 }
 
-func (c *Client) newClientConn(conn ServerCodec) *clientConn {
+func (c *Client) newClientConn(conn ServerCodec, apiMaxDuration time.Duration) *clientConn {
 	ctx := context.WithValue(context.Background(), clientContextKey{}, c)
+	// Http connections have already set the scheme
+	if !c.isHTTP() && c.scheme != "" {
+		ctx = context.WithValue(ctx, "scheme", c.scheme)
+	}
 	handler := newHandler(ctx, conn, c.idgen, c.services)
+
+	// When apiMaxDuration is 0 (as is the case for all client invocations of
+	// this function), deadlineContext is ignored.
+	handler.deadlineContext = apiMaxDuration
 	return &clientConn{conn, handler}
 }
 
@@ -146,7 +160,7 @@ func (op *requestOp) wait(ctx context.Context, c *Client) (*jsonrpcMessage, erro
 	select {
 	case <-ctx.Done():
 		// Send the timeout to dispatch so it can remove the request IDs.
-		if !c.isHTTP {
+		if !c.isHTTP() {
 			select {
 			case c.reqTimeout <- op:
 			case <-c.closing:
@@ -207,16 +221,24 @@ func newClient(initctx context.Context, connect reconnectFunc) (*Client, error) 
 	if err != nil {
 		return nil, err
 	}
-	c := initClient(conn, randomIDGenerator(), new(serviceRegistry))
+	c := initClient(conn, randomIDGenerator(), new(serviceRegistry), 0)
 	c.reconnectFunc = connect
 	return c, nil
 }
 
-func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry) *Client {
-	_, isHTTP := conn.(*httpConn)
+func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry, apiMaxDuration time.Duration) *Client {
+	scheme := ""
+	switch conn.(type) {
+	case *httpConn:
+		scheme = httpScheme
+	case *websocketCodec:
+		scheme = wsScheme
+	case *jsonCodec:
+		scheme = ipcScheme
+	}
 	c := &Client{
 		idgen:       idgen,
-		isHTTP:      isHTTP,
+		scheme:      scheme,
 		services:    services,
 		writeConn:   conn,
 		close:       make(chan struct{}),
@@ -229,8 +251,8 @@ func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry) *C
 		reqSent:     make(chan error, 1),
 		reqTimeout:  make(chan *requestOp),
 	}
-	if !isHTTP {
-		go c.dispatch(conn)
+	if !c.isHTTP() {
+		go c.dispatch(conn, apiMaxDuration)
 	}
 	return c
 }
@@ -260,7 +282,7 @@ func (c *Client) SupportedModules() (map[string]string, error) {
 
 // Close closes the client, aborting any in-flight requests.
 func (c *Client) Close() {
-	if c.isHTTP {
+	if c.isHTTP() {
 		return
 	}
 	select {
@@ -274,7 +296,7 @@ func (c *Client) Close() {
 // This method only works for clients using HTTP, it doesn't have
 // any effect for clients using another transport.
 func (c *Client) SetHeader(key, value string) {
-	if !c.isHTTP {
+	if !c.isHTTP() {
 		return
 	}
 	conn := c.writeConn.(*httpConn)
@@ -308,7 +330,7 @@ func (c *Client) CallContext(ctx context.Context, result interface{}, method str
 	}
 	op := &requestOp{ids: []json.RawMessage{msg.ID}, resp: make(chan *jsonrpcMessage, 1)}
 
-	if c.isHTTP {
+	if c.isHTTP() {
 		err = c.sendHTTP(ctx, op, msg)
 	} else {
 		err = c.send(ctx, op, msg)
@@ -367,7 +389,7 @@ func (c *Client) BatchCallContext(ctx context.Context, b []BatchElem) error {
 	}
 
 	var err error
-	if c.isHTTP {
+	if c.isHTTP() {
 		err = c.sendBatchHTTP(ctx, op, msgs)
 	} else {
 		err = c.send(ctx, op, msgs)
@@ -412,7 +434,7 @@ func (c *Client) Notify(ctx context.Context, method string, args ...interface{})
 	}
 	msg.ID = nil
 
-	if c.isHTTP {
+	if c.isHTTP() {
 		return c.sendHTTP(ctx, op, msg)
 	}
 	return c.send(ctx, op, msg)
@@ -450,7 +472,7 @@ func (c *Client) Subscribe(ctx context.Context, namespace string, channel interf
 	if chanVal.IsNil() {
 		panic("channel given to Subscribe must not be nil")
 	}
-	if c.isHTTP {
+	if c.isHTTP() {
 		return nil, ErrNotificationsUnsupported
 	}
 
@@ -548,11 +570,11 @@ func (c *Client) reconnect(ctx context.Context) error {
 // dispatch is the main loop of the client.
 // It sends read messages to waiting calls to Call and BatchCall
 // and subscription notifications to registered subscriptions.
-func (c *Client) dispatch(codec ServerCodec) {
+func (c *Client) dispatch(codec ServerCodec, apiMaxDuration time.Duration) {
 	var (
 		lastOp      *requestOp  // tracks last send operation
 		reqInitLock = c.reqInit // nil while the send lock is held
-		conn        = c.newClientConn(codec)
+		conn        = c.newClientConn(codec, apiMaxDuration)
 		reading     = true
 	)
 	defer func() {
@@ -599,7 +621,7 @@ func (c *Client) dispatch(codec ServerCodec) {
 			}
 			go c.read(newcodec)
 			reading = true
-			conn = c.newClientConn(newcodec)
+			conn = c.newClientConn(newcodec, apiMaxDuration)
 			// Re-register the in-flight request on the new handler
 			// because that's where it will be sent.
 			conn.handler.addRequestOp(lastOp)
@@ -651,4 +673,8 @@ func (c *Client) read(codec ServerCodec) {
 		}
 		c.readOp <- readOp{msgs, batch}
 	}
+}
+
+func (c *Client) isHTTP() bool {
+	return c.scheme == httpScheme
 }

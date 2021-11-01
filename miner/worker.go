@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/ava-labs/coreth/consensus"
+	"github.com/ava-labs/coreth/consensus/dummy"
 	"github.com/ava-labs/coreth/consensus/misc"
 	"github.com/ava-labs/coreth/core"
 	"github.com/ava-labs/coreth/core/aclock"
@@ -56,16 +57,12 @@ type environment struct {
 	tcount  int            // tx count in cycle
 	gasPool *core.GasPool  // available gas used to pack transactions
 
+	parent   *types.Header
 	header   *types.Header
 	txs      []*types.Transaction
 	receipts []*types.Receipt
 
 	start time.Time // Time that block building began
-}
-
-type MinerCallbacks struct {
-	OnSealFinish func(*types.Block)
-	OnSealDrop   func(*types.Block)
 }
 
 // worker is the main object which takes care of submitting new work to consensus engine
@@ -85,19 +82,16 @@ type worker struct {
 	mux      *event.TypeMux // TODO replace
 	mu       sync.RWMutex   // The lock used to protect the coinbase and extra fields
 	coinbase common.Address
-
-	minerCallbacks *MinerCallbacks
 }
 
-func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, mcb *MinerCallbacks) *worker {
+func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux) *worker {
 	worker := &worker{
-		config:         config,
-		chainConfig:    chainConfig,
-		engine:         engine,
-		eth:            eth,
-		mux:            mux,
-		chain:          eth.BlockChain(),
-		minerCallbacks: mcb,
+		config:      config,
+		chainConfig: chainConfig,
+		engine:      engine,
+		eth:         eth,
+		mux:         mux,
+		chain:       eth.BlockChain(),
 	}
 
 	return worker
@@ -127,9 +121,11 @@ func (w *worker) commitNewWork() (*types.Block, error) {
 
 	var gasLimit uint64
 	if w.chainConfig.IsApricotPhase1(big.NewInt(timestamp)) {
-		gasLimit = w.config.ApricotPhase1GasLimit
+		gasLimit = params.ApricotPhase1GasLimit
 	} else {
-		gasLimit = core.CalcGasLimit(parent, w.config.GasFloor, w.config.GasCeil)
+		// The gas limit is set in phase1 to ApricotPhase1GasLimit because the ceiling and floor were set to the same value
+		// such that the gas limit converged to it. Since this is hardbaked now, we remove the ability to configure it.
+		gasLimit = core.CalcGasLimit(parent.GasUsed(), parent.GasLimit(), params.ApricotPhase1GasLimit, params.ApricotPhase1GasLimit)
 	}
 
 	num := parent.Number()
@@ -139,6 +135,15 @@ func (w *worker) commitNewWork() (*types.Block, error) {
 		GasLimit:   gasLimit,
 		Extra:      nil,
 		Time:       uint64(timestamp),
+	}
+	// Set BaseFee and Extra data field if we are post ApricotPhase3
+	bigTimestamp := big.NewInt(timestamp)
+	if w.chainConfig.IsApricotPhase3(bigTimestamp) {
+		var err error
+		header.Extra, header.BaseFee, err = dummy.CalcBaseFee(w.chainConfig, parent.Header(), uint64(timestamp))
+		if err != nil {
+			return nil, fmt.Errorf("failed to calculate new base fee: %w", err)
+		}
 	}
 	if w.coinbase == (common.Address{}) {
 		return nil, errors.New("cannot mine without etherbase")
@@ -157,10 +162,7 @@ func (w *worker) commitNewWork() (*types.Block, error) {
 	}
 
 	// Fill the block with all available pending transactions.
-	pending, err := w.eth.TxPool().Pending()
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch pending transactions: %w", err)
-	}
+	pending := w.eth.TxPool().Pending(true)
 
 	// Split the pending transactions into locals and remotes
 	localTxs := make(map[common.Address]types.Transactions)
@@ -172,11 +174,11 @@ func (w *worker) commitNewWork() (*types.Block, error) {
 		}
 	}
 	if len(localTxs) > 0 {
-		txs := types.NewTransactionsByPriceAndNonce(env.signer, localTxs)
+		txs := types.NewTransactionsByPriceAndNonce(env.signer, localTxs, header.BaseFee)
 		w.commitTransactions(env, txs, w.coinbase)
 	}
 	if len(remoteTxs) > 0 {
-		txs := types.NewTransactionsByPriceAndNonce(env.signer, remoteTxs)
+		txs := types.NewTransactionsByPriceAndNonce(env.signer, remoteTxs, header.BaseFee)
 		w.commitTransactions(env, txs, w.coinbase)
 	}
 
@@ -191,6 +193,7 @@ func (w *worker) createCurrentEnvironment(parent *types.Block, header *types.Hea
 	return &environment{
 		signer:  types.MakeSigner(w.chainConfig, header.Number, new(big.Int).SetUint64(header.Time)),
 		state:   state,
+		parent:  parent.Header(),
 		header:  header,
 		tcount:  0,
 		gasPool: new(core.GasPool).AddGas(header.GasLimit),
@@ -238,7 +241,7 @@ func (w *worker) commitTransactions(env *environment, txs *types.TransactionsByP
 			continue
 		}
 		// Start executing the transaction
-		env.state.Prepare(tx.Hash(), common.Hash{}, env.tcount)
+		env.state.Prepare(tx.Hash(), env.tcount)
 
 		_, err := w.commitTransaction(env, tx, coinbase)
 		switch {
@@ -280,12 +283,8 @@ func (w *worker) commitTransactions(env *environment, txs *types.TransactionsByP
 func (w *worker) commit(env *environment) (*types.Block, error) {
 	// Deep copy receipts here to avoid interaction between different tasks.
 	receipts := copyReceipts(env.receipts)
-	block, err := w.engine.FinalizeAndAssemble(w.chain, env.header, env.state, env.txs, nil, receipts)
+	block, err := w.engine.FinalizeAndAssemble(w.chain, env.header, env.parent, env.state, env.txs, nil, receipts)
 	if err != nil {
-		return nil, err
-	}
-
-	if err := w.engine.Seal(w.chain, block); err != nil {
 		return nil, err
 	}
 
@@ -323,9 +322,6 @@ func (w *worker) handleResult(env *environment, block *types.Block, createdAt ti
 
 	log.Info("Commit new mining work", "number", block.Number(), "hash", hash, "uncles", 0, "txs", env.tcount,
 		"gas", block.GasUsed(), "fees", totalFees(block, receipts), "elapsed", common.PrettyDuration(time.Since(env.start)))
-	if w.minerCallbacks.OnSealFinish != nil {
-		w.minerCallbacks.OnSealFinish(block)
-	}
 
 	// Note: the miner no longer emits a NewMinedBlock event. Instead the caller
 	// is responsible for running any additional verification and then inserting

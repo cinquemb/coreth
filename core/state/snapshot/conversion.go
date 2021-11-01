@@ -36,13 +36,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ava-labs/coreth/core/rawdb"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ava-labs/coreth/core/aclock"
-	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ava-labs/coreth/core/rawdb"
+	"github.com/ava-labs/coreth/ethdb"
+	"github.com/ava-labs/coreth/trie"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/trie"
 )
 
 // trieKV represents a trie key-value pair
@@ -76,7 +76,7 @@ func GenerateStorageTrieRoot(account common.Hash, it StorageIterator) (common.Ha
 // (account trie + all storage tries).
 func GenerateTrie(snaptree *Tree, root common.Hash, src ethdb.Database, dst ethdb.KeyValueWriter) error {
 	// Traverse all state by snapshot, re-generate the whole state trie
-	acctIt, err := snaptree.AccountIterator(root, common.Hash{})
+	acctIt, err := snaptree.AccountIterator(root, common.Hash{}, false)
 	if err != nil {
 		return err // The required snapshot might not exist.
 	}
@@ -92,7 +92,7 @@ func GenerateTrie(snaptree *Tree, root common.Hash, src ethdb.Database, dst ethd
 			rawdb.WriteCode(dst, codeHash, code)
 		}
 		// Then migrate all storage trie nodes into the tmp db.
-		storageIt, err := snaptree.StorageIterator(root, accountHash, common.Hash{})
+		storageIt, err := snaptree.StorageIterator(root, accountHash, common.Hash{}, false)
 		if err != nil {
 			return common.Hash{}, err
 		}
@@ -334,7 +334,7 @@ func generateTrieRoot(db ethdb.KeyValueWriter, it Iterator, account common.Hash,
 						return
 					}
 					if !bytes.Equal(account.Root, subroot.Bytes()) {
-						results <- fmt.Errorf("invalid subroot(%x), want %x, got %x", it.Hash(), account.Root, subroot)
+						results <- fmt.Errorf("invalid subroot(path %x), want %x, have %x", hash, account.Root, subroot)
 						return
 					}
 					results <- nil

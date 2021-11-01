@@ -37,9 +37,9 @@ import (
 	"github.com/ava-labs/coreth/core"
 	"github.com/ava-labs/coreth/core/bloombits"
 	"github.com/ava-labs/coreth/core/types"
+	"github.com/ava-labs/coreth/ethdb"
 	"github.com/ava-labs/coreth/rpc"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 )
 
@@ -122,9 +122,11 @@ func NewRangeFilter(backend Backend, begin, end int64, addresses []common.Addres
 
 	// Create a generic filter and convert it into a range filter
 	filter := newFilter(backend, addresses, topics)
+
 	filter.matcher = bloombits.NewMatcher(size, filters)
 	filter.begin = begin
 	filter.end = end
+
 	return filter, nil
 }
 

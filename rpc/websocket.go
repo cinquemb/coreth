@@ -46,8 +46,9 @@ import (
 const (
 	wsReadBuffer       = 1024
 	wsWriteBuffer      = 1024
-	wsPingInterval     = 60 * time.Second
+	wsPingInterval     = 30 * time.Second
 	wsPingWriteTimeout = 5 * time.Second
+	wsPongTimeout      = 30 * time.Second
 	wsMessageSizeLimit = 15 * 1024 * 1024
 )
 
@@ -58,6 +59,10 @@ var wsBufferPool = new(sync.Pool)
 // allowedOrigins should be a comma-separated list of allowed origin URLs.
 // To allow connections with any origin, pass "*".
 func (s *Server) WebsocketHandler(allowedOrigins []string) http.Handler {
+	return s.WebsocketHandlerWithDuration(allowedOrigins, 0)
+}
+
+func (s *Server) WebsocketHandlerWithDuration(allowedOrigins []string, apiMaxDuration time.Duration) http.Handler {
 	var upgrader = websocket.Upgrader{
 		ReadBufferSize:  wsReadBuffer,
 		WriteBufferSize: wsWriteBuffer,
@@ -71,7 +76,7 @@ func (s *Server) WebsocketHandler(allowedOrigins []string) http.Handler {
 			return
 		}
 		codec := newWebsocketCodec(conn)
-		s.ServeCodec(codec, 0)
+		s.ServeCodec(codec, 0, apiMaxDuration)
 	})
 }
 
@@ -107,7 +112,7 @@ func wsHandshakeValidator(allowedOrigins []string) func(*http.Request) bool {
 		if _, ok := req.Header["Origin"]; !ok {
 			return true
 		}
-		// Verify origin against whitelist.
+		// Verify origin against allow list.
 		origin := strings.ToLower(req.Header.Get("Origin"))
 		if allowAllOrigins || originIsAllowed(origins, origin) {
 			return true
@@ -252,6 +257,10 @@ type websocketCodec struct {
 
 func newWebsocketCodec(conn *websocket.Conn) ServerCodec {
 	conn.SetReadLimit(wsMessageSizeLimit)
+	conn.SetPongHandler(func(appData string) error {
+		conn.SetReadDeadline(time.Time{})
+		return nil
+	})
 	wc := &websocketCodec{
 		jsonCodec: NewFuncCodec(conn, conn.WriteJSON, conn.ReadJSON).(*jsonCodec),
 		conn:      conn,
@@ -268,7 +277,11 @@ func (wc *websocketCodec) close() {
 }
 
 func (wc *websocketCodec) writeJSON(ctx context.Context, v interface{}) error {
-	err := wc.jsonCodec.writeJSON(ctx, v)
+	return wc.writeJSONSkipDeadline(ctx, v, false)
+}
+
+func (wc *websocketCodec) writeJSONSkipDeadline(ctx context.Context, v interface{}, skip bool) error {
+	err := wc.jsonCodec.writeJSONSkipDeadline(ctx, v, skip)
 	if err == nil {
 		// Notify pingLoop to delay the next idle ping.
 		select {
@@ -298,6 +311,7 @@ func (wc *websocketCodec) pingLoop() {
 			wc.jsonCodec.encMu.Lock()
 			wc.conn.SetWriteDeadline(aclock.Now().Add(wsPingWriteTimeout))
 			wc.conn.WriteMessage(websocket.PingMessage, nil)
+			wc.conn.SetReadDeadline(aclock.Now().Add(wsPongTimeout))
 			wc.jsonCodec.encMu.Unlock()
 			timer.Reset(wsPingInterval)
 		}

@@ -109,7 +109,7 @@ func (s *Server) RegisterName(name string, receiver interface{}) error {
 // server is stopped. In either case the codec is closed.
 //
 // Note that codec options are no longer supported.
-func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
+func (s *Server) ServeCodec(codec ServerCodec, options CodecOption, apiMaxDuration time.Duration) {
 	defer codec.close()
 
 	// Don't serve if server is stopped.
@@ -121,7 +121,7 @@ func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
 	s.codecs.Add(codec)
 	defer s.codecs.Remove(codec)
 
-	c := initClient(codec, s.idgen, &s.services)
+	c := initClient(codec, s.idgen, &s.services, apiMaxDuration)
 	<-codec.closed()
 	c.Close()
 }
@@ -135,15 +135,8 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec) {
 		return
 	}
 
-	// If the length of API calls should be limited, provide a deadline.
-	if s.maximumDuration > 0 {
-		ctx = contextWithDeadline{
-			Context:  ctx,
-			deadline: aclock.Now().Add(s.maximumDuration),
-		}
-	}
-
 	h := newHandler(ctx, codec, s.idgen, &s.services)
+	h.deadlineContext = s.maximumDuration
 	h.allowSubscribe = false
 	defer h.close(io.EOF, nil)
 

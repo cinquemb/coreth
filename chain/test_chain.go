@@ -9,11 +9,13 @@ import (
 	"testing"
 
 	"github.com/ava-labs/coreth/accounts/keystore"
+	"github.com/ava-labs/coreth/consensus/dummy"
 	"github.com/ava-labs/coreth/core"
 	"github.com/ava-labs/coreth/core/rawdb"
 	"github.com/ava-labs/coreth/core/types"
 	"github.com/ava-labs/coreth/eth"
 	"github.com/ava-labs/coreth/eth/ethconfig"
+	"github.com/ava-labs/coreth/node"
 	"github.com/ava-labs/coreth/params"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -22,11 +24,11 @@ import (
 var (
 	basicTxGasLimit       = 21000
 	fundedKey, bob, alice *keystore.Key
-	initialBalance        = big.NewInt(100000000000000000)
+	initialBalance        = big.NewInt(1000000000000000000)
 	chainID               = big.NewInt(1)
 	value                 = big.NewInt(1000000000000)
-	gasLimit              = 10000000
-	gasPrice              = big.NewInt(1000000000)
+	gasLimit              = 1000000
+	gasPrice              = big.NewInt(params.LaunchMinGasPrice)
 )
 
 func init() {
@@ -75,27 +77,48 @@ func NewDefaultChain(t *testing.T) (*ETHChain, chan core.NewTxPoolHeadEvent, <-c
 		Alloc:      core.GenesisAlloc{fundedKey.Address: {Balance: initialBalance}},
 	}
 
-	chain := NewETHChain(&config, nil, rawdb.NewMemoryDatabase(), eth.DefaultSettings, true)
-
-	if err := chain.Accept(chain.GetGenesisBlock()); err != nil {
+	var (
+		chain *ETHChain
+		err   error
+	)
+	chain, err = NewETHChain(
+		&config,
+		&node.Config{},
+		rawdb.NewMemoryDatabase(),
+		eth.DefaultSettings,
+		new(dummy.ConsensusCallbacks),
+		common.Hash{},
+	)
+	if err != nil {
 		t.Fatal(err)
 	}
-
-	chain.SetOnSealFinish(func(block *types.Block) {
-		if _, err := chain.InsertChain([]*types.Block{block}); err != nil {
-			t.Fatal(err)
-		}
-		if err := chain.SetPreference(block); err != nil {
-			t.Fatal(err)
-		}
-		if err := chain.Accept(block); err != nil {
-			t.Fatal(err)
-		}
-	})
 
 	newTxPoolHeadChan := make(chan core.NewTxPoolHeadEvent, 1)
 	chain.GetTxPool().SubscribeNewHeadEvent(newTxPoolHeadChan)
 
 	txSubmitCh := chain.GetTxSubmitCh()
 	return chain, newTxPoolHeadChan, txSubmitCh
+}
+
+// insertAndAccept inserts [block] into [chain], sets the chains preference to it
+// and then Accepts it.
+func insertAndAccept(t *testing.T, chain *ETHChain, block *types.Block) {
+	if err := chain.InsertBlock(block); err != nil {
+		t.Fatal(err)
+	}
+	if err := chain.SetPreference(block); err != nil {
+		t.Fatal(err)
+	}
+	if err := chain.Accept(block); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertAndSetPreference(t *testing.T, chain *ETHChain, block *types.Block) {
+	if err := chain.InsertBlock(block); err != nil {
+		t.Fatal(err)
+	}
+	if err := chain.SetPreference(block); err != nil {
+		t.Fatal(err)
+	}
 }

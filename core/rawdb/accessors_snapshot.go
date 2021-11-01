@@ -29,8 +29,8 @@ package rawdb
 import (
 	"encoding/binary"
 
+	"github.com/ava-labs/coreth/ethdb"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 )
 
@@ -52,13 +52,41 @@ func WriteSnapshotRoot(db ethdb.KeyValueWriter, root common.Hash) {
 	}
 }
 
-// DeleteSnapshotRoot deletes the hash of the block whose state is contained in
+// DeleteSnapshotRoot deletes the root of the block whose state is contained in
 // the persisted snapshot. Since snapshots are not immutable, this  method can
 // be used during updates, so a crash or failure will mark the entire snapshot
 // invalid.
 func DeleteSnapshotRoot(db ethdb.KeyValueWriter) {
 	if err := db.Delete(snapshotRootKey); err != nil {
 		log.Crit("Failed to remove snapshot root", "err", err)
+	}
+}
+
+// ReadSnapshotBlockHash retrieves the hash of the block whose state is contained in
+// the persisted snapshot.
+func ReadSnapshotBlockHash(db ethdb.KeyValueReader) common.Hash {
+	data, _ := db.Get(snapshotBlockHashKey)
+	if len(data) != common.HashLength {
+		return common.Hash{}
+	}
+	return common.BytesToHash(data)
+}
+
+// WriteSnapshotRoot stores the root of the block whose state is contained in
+// the persisted snapshot.
+func WriteSnapshotBlockHash(db ethdb.KeyValueWriter, blockHash common.Hash) {
+	if err := db.Put(snapshotBlockHashKey, blockHash[:]); err != nil {
+		log.Crit("Failed to store snapshot block hash", "err", err)
+	}
+}
+
+// DeleteSnapshotBlockHash deletes the hash of the block whose state is contained in
+// the persisted snapshot. Since snapshots are not immutable, this  method can
+// be used during updates, so a crash or failure will mark the entire snapshot
+// invalid.
+func DeleteSnapshotBlockHash(db ethdb.KeyValueWriter) {
+	if err := db.Delete(snapshotBlockHashKey); err != nil {
+		log.Crit("Failed to remove snapshot block hash", "err", err)
 	}
 }
 
@@ -106,29 +134,6 @@ func DeleteStorageSnapshot(db ethdb.KeyValueWriter, accountHash, storageHash com
 // space of a specific account.
 func IterateStorageSnapshots(db ethdb.Iteratee, accountHash common.Hash) ethdb.Iterator {
 	return db.NewIterator(storageSnapshotsKey(accountHash), nil)
-}
-
-// ReadSnapshotJournal retrieves the serialized in-memory diff layers saved at
-// the last shutdown. The blob is expected to be max a few 10s of megabytes.
-func ReadSnapshotJournal(db ethdb.KeyValueReader) []byte {
-	data, _ := db.Get(snapshotJournalKey)
-	return data
-}
-
-// WriteSnapshotJournal stores the serialized in-memory diff layers to save at
-// shutdown. The blob is expected to be max a few 10s of megabytes.
-func WriteSnapshotJournal(db ethdb.KeyValueWriter, journal []byte) {
-	if err := db.Put(snapshotJournalKey, journal); err != nil {
-		log.Crit("Failed to store snapshot journal", "err", err)
-	}
-}
-
-// DeleteSnapshotJournal deletes the serialized in-memory diff layers saved at
-// the last shutdown
-func DeleteSnapshotJournal(db ethdb.KeyValueWriter) {
-	if err := db.Delete(snapshotJournalKey); err != nil {
-		log.Crit("Failed to remove snapshot journal", "err", err)
-	}
 }
 
 // ReadSnapshotGenerator retrieves the serialized snapshot generator saved at

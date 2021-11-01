@@ -17,6 +17,7 @@ import (
 	"github.com/ava-labs/avalanchego/utils/crypto"
 	"github.com/ava-labs/avalanchego/utils/formatting"
 	"github.com/ava-labs/avalanchego/utils/json"
+	"github.com/ava-labs/coreth/params"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
@@ -36,13 +37,9 @@ var (
 	errNoAddresses   = errors.New("no addresses provided")
 	errNoSourceChain = errors.New("no source chain provided")
 	errNilTxID       = errors.New("nil transaction ID")
+
+	initialBaseFee = big.NewInt(params.ApricotPhase3InitialBaseFee)
 )
-
-// SnowmanAPI introduces snowman specific functionality to the evm
-type SnowmanAPI struct{ vm *VM }
-
-// AvaxAPI offers Avalanche network related API methods
-type AvaxAPI struct{ vm *VM }
 
 // NetAPI offers network related API methods
 type NetAPI struct{ vm *VM }
@@ -51,7 +48,7 @@ type NetAPI struct{ vm *VM }
 func (s *NetAPI) Listening() bool { return true } // always listening
 
 // PeerCount returns the number of connected peers
-func (s *NetAPI) PeerCount() hexutil.Uint { return hexutil.Uint(0) } // TODO: report number of connected peers
+func (s *NetAPI) PeerCount() hexutil.Uint { return hexutil.Uint(0) }
 
 // Version returns the current ethereum protocol version.
 func (s *NetAPI) Version() string { return fmt.Sprintf("%d", s.vm.networkID) }
@@ -76,6 +73,8 @@ func (service *AvaxAPI) IssueBlock(r *http.Request, args *IssueBlockArgs, reply 
 
 	return nil
 }
+// SnowmanAPI introduces snowman specific functionality to the evm
+type SnowmanAPI struct{ vm *VM }
 
 // GetAcceptedFrontReply defines the reply that will be sent from the
 // GetAcceptedFront API call
@@ -97,9 +96,12 @@ func (api *SnowmanAPI) GetAcceptedFront(ctx context.Context) (*GetAcceptedFrontR
 func (api *SnowmanAPI) IssueBlock(ctx context.Context) error {
 	log.Info("Issuing a new block")
 
-	api.vm.signalTxsReady()
+	api.vm.builder.signalTxsReady()
 	return nil
 }
+
+// AvaxAPI offers Avalanche network related API methods
+type AvaxAPI struct{ vm *VM }
 
 // parseAssetID parses an assetID string into an ID
 func (service *AvaxAPI) parseAssetID(assetID string) (ids.ID, error) {
@@ -110,6 +112,16 @@ func (service *AvaxAPI) parseAssetID(assetID string) (ids.ID, error) {
 	} else {
 		return ids.FromString(assetID)
 	}
+}
+
+type VersionReply struct {
+	Version string `json:"version"`
+}
+
+// ClientVersion returns the version of the VM running
+func (service *AvaxAPI) Version(r *http.Request, args *struct{}, reply *VersionReply) error {
+	reply.Version = Version
+	return nil
 }
 
 // ExportKeyArgs are arguments for ExportKey
@@ -148,7 +160,7 @@ func (service *AvaxAPI) ExportKey(r *http.Request, args *ExportKeyArgs, reply *E
 	if err != nil {
 		return fmt.Errorf("problem retrieving private key: %w", err)
 	}
-	encodedKey, err := formatting.Encode(formatting.CB58, sk.Bytes())
+	encodedKey, err := formatting.EncodeWithChecksum(formatting.CB58, sk.Bytes())
 	if err != nil {
 		return fmt.Errorf("problem encoding bytes as cb58: %w", err)
 	}
@@ -165,7 +177,7 @@ type ImportKeyArgs struct {
 
 // ImportKey adds a private key to the provided user
 func (service *AvaxAPI) ImportKey(r *http.Request, args *ImportKeyArgs, reply *api.JSONAddress) error {
-	log.Info(fmt.Sprintf("EVM: ImportKey called for user '%s'", args.Username))
+	log.Info("EVM: ImportKey called", "username", args.Username)
 
 	if !strings.HasPrefix(args.PrivateKey, constants.SecretKeyPrefix) {
 		return fmt.Errorf("private key missing %s prefix", constants.SecretKeyPrefix)
@@ -208,6 +220,9 @@ func (service *AvaxAPI) ImportKey(r *http.Request, args *ImportKeyArgs, reply *a
 // ImportArgs are arguments for passing into Import requests
 type ImportArgs struct {
 	api.UserPass
+
+	// Fee that should be used when creating the tx
+	BaseFee *hexutil.Big `json:"baseFee"`
 
 	// Chain the funds are coming from
 	SourceChain string `json:"sourceChain"`
@@ -252,18 +267,32 @@ func (service *AvaxAPI) Import(_ *http.Request, args *ImportArgs, response *api.
 		return fmt.Errorf("couldn't get keys controlled by the user: %w", err)
 	}
 
-	tx, err := service.vm.newImportTx(chainID, to, privKeys)
+	var baseFee *big.Int
+	if args.BaseFee == nil {
+		// Get the base fee to use
+		baseFee, err = service.vm.estimateBaseFee(context.Background())
+		if err != nil {
+			return err
+		}
+	} else {
+		baseFee = args.BaseFee.ToInt()
+	}
+
+	tx, err := service.vm.newImportTx(chainID, to, baseFee, privKeys)
 	if err != nil {
 		return err
 	}
 
 	response.TxID = tx.ID()
-	return service.vm.issueTx(tx)
+	return service.vm.issueTx(tx, true /*=local*/)
 }
 
 // ExportAVAXArgs are the arguments to ExportAVAX
 type ExportAVAXArgs struct {
 	api.UserPass
+
+	// Fee that should be used when creating the tx
+	BaseFee *hexutil.Big `json:"baseFee"`
 
 	// Amount of asset to send
 	Amount json.Uint64 `json:"amount"`
@@ -324,20 +353,32 @@ func (service *AvaxAPI) Export(_ *http.Request, args *ExportArgs, response *api.
 		return fmt.Errorf("couldn't get addresses controlled by the user: %w", err)
 	}
 
+	var baseFee *big.Int
+	if args.BaseFee == nil {
+		// Get the base fee to use
+		baseFee, err = service.vm.estimateBaseFee(context.Background())
+		if err != nil {
+			return err
+		}
+	} else {
+		baseFee = args.BaseFee.ToInt()
+	}
+
 	// Create the transaction
 	tx, err := service.vm.newExportTx(
 		assetID,             // AssetID
 		uint64(args.Amount), // Amount
 		chainID,             // ID of the chain to send the funds to
 		to,                  // Address
-		privKeys,            // Private keys
+		baseFee,
+		privKeys, // Private keys
 	)
 	if err != nil {
 		return fmt.Errorf("couldn't create tx: %w", err)
 	}
 
 	response.TxID = tx.ID()
-	return service.vm.issueTx(tx)
+	return service.vm.issueTx(tx, true /*=local*/)
 }
 
 // GetUTXOs gets all utxos for passed in addresses
@@ -400,7 +441,7 @@ func (service *AvaxAPI) GetUTXOs(r *http.Request, args *api.GetUTXOsArgs, reply 
 		if err != nil {
 			return fmt.Errorf("problem marshalling UTXO: %w", err)
 		}
-		str, err := formatting.Encode(args.Encoding, b)
+		str, err := formatting.EncodeWithChecksum(args.Encoding, b)
 		if err != nil {
 			return fmt.Errorf("problem encoding utxo: %w", err)
 		}
@@ -436,24 +477,8 @@ func (service *AvaxAPI) IssueTx(r *http.Request, args *api.FormattedTx, response
 		return fmt.Errorf("problem initializing transaction: %w", err)
 	}
 
-	blockIntf := service.vm.LastAcceptedBlockInternal()
-	block, ok := blockIntf.(*Block)
-	if !ok {
-		return fmt.Errorf("last accepted block %s had unexpected type %T", blockIntf.ID(), blockIntf)
-	}
-	if err := tx.UnsignedAtomicTx.SemanticVerify(service.vm, tx, block, service.vm.currentRules()); err != nil {
-		return err
-	}
-	state, err := service.vm.chain.CurrentState()
-	if err != nil {
-		return fmt.Errorf("problem retrieving current state: %w", err)
-	}
-	if err := tx.UnsignedAtomicTx.EVMStateTransfer(service.vm, state); err != nil {
-		return err
-	}
-
 	response.TxID = tx.ID()
-	return service.vm.issueTx(tx)
+	return service.vm.issueTx(tx, true /*=local*/)
 }
 
 // GetAtomicTxStatusReply defines the GetAtomicTxStatus replies returned from the API
@@ -464,7 +489,7 @@ type GetAtomicTxStatusReply struct {
 
 // GetAtomicTxStatus returns the status of the specified transaction
 func (service *AvaxAPI) GetAtomicTxStatus(r *http.Request, args *api.JSONTxID, reply *GetAtomicTxStatusReply) error {
-	log.Info("EVM: GetAtomicTxStatus called with %s", args.TxID)
+	log.Info("EVM: GetAtomicTxStatus called", "txID", args.TxID)
 
 	if args.TxID == ids.Empty {
 		return errNilTxID
@@ -487,7 +512,7 @@ type FormattedTx struct {
 
 // GetAtomicTx returns the specified transaction
 func (service *AvaxAPI) GetAtomicTx(r *http.Request, args *api.GetTxArgs, reply *FormattedTx) error {
-	log.Info("EVM: GetAtomicTx called with %s", args.TxID)
+	log.Info("EVM: GetAtomicTx called", "txID", args.TxID)
 
 	if args.TxID == ids.Empty {
 		return errNilTxID
@@ -502,7 +527,7 @@ func (service *AvaxAPI) GetAtomicTx(r *http.Request, args *api.GetTxArgs, reply 
 		return fmt.Errorf("could not find tx %s", args.TxID)
 	}
 
-	txBytes, err := formatting.Encode(args.Encoding, tx.Bytes())
+	txBytes, err := formatting.EncodeWithChecksum(args.Encoding, tx.Bytes())
 	if err != nil {
 		return err
 	}

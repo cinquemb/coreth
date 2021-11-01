@@ -75,6 +75,8 @@ type handler struct {
 
 	subLock    sync.Mutex
 	serverSubs map[ID]*Subscription
+
+	deadlineContext time.Duration // limits execution after some time.Duration
 }
 
 type callProc struct {
@@ -108,7 +110,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	// Emit error response for empty batches:
 	if len(msgs) == 0 {
 		h.startCallProc(func(cp *callProc) {
-			h.conn.writeJSON(cp.ctx, errorMessage(&invalidRequestError{"empty batch"}))
+			h.conn.writeJSONSkipDeadline(cp.ctx, errorMessage(&invalidRequestError{"empty batch"}), h.deadlineContext > 0)
 		})
 		return
 	}
@@ -133,7 +135,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		}
 		h.addSubscriptions(cp.notifiers)
 		if len(answers) > 0 {
-			h.conn.writeJSON(cp.ctx, answers)
+			h.conn.writeJSONSkipDeadline(cp.ctx, answers, h.deadlineContext > 0)
 		}
 		for _, n := range cp.notifiers {
 			n.activate()
@@ -150,7 +152,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage) {
 		answer := h.handleCallMsg(cp, msg)
 		h.addSubscriptions(cp.notifiers)
 		if answer != nil {
-			h.conn.writeJSON(cp.ctx, answer)
+			h.conn.writeJSONSkipDeadline(cp.ctx, answer, h.deadlineContext > 0)
 		}
 		for _, n := range cp.notifiers {
 			n.activate()
@@ -233,6 +235,12 @@ func (h *handler) startCallProc(fn func(*callProc)) {
 	go func() {
 		ctx, cancel := context.WithCancel(h.rootCtx)
 		defer h.callWG.Done()
+		if h.deadlineContext > 0 {
+			ctx = contextWithDeadline{
+				Context:  ctx,
+				deadline: aclock.Now().Add(h.deadlineContext),
+			}
+		}
 		defer cancel()
 		fn(&callProc{ctx: ctx})
 	}()

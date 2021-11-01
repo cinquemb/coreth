@@ -31,6 +31,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -43,18 +44,6 @@ type API struct {
 	Version   string      // api version for DApp's
 	Service   interface{} // receiver instance which holds the methods
 	Public    bool        // indication if the methods must be considered safe for public use
-}
-
-// Error wraps RPC errors, which contain an error code in addition to the message.
-type Error interface {
-	Error() string  // returns the message
-	ErrorCode() int // returns the code
-}
-
-// A DataError contains some data in addition to the error message.
-type DataError interface {
-	Error() string          // returns the message
-	ErrorData() interface{} // returns the error data
 }
 
 // ServerCodec implements reading, parsing and writing RPC messages for the server side of
@@ -70,6 +59,7 @@ type ServerCodec interface {
 // Implementations must be safe for concurrent use.
 type jsonWriter interface {
 	writeJSON(context.Context, interface{}) error
+	writeJSONSkipDeadline(context.Context, interface{}, bool) error
 	// Closed returns a channel which is closed when the connection is closed.
 	closed() <-chan interface{}
 	// RemoteAddr returns the peer address of the connection.
@@ -121,6 +111,24 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 	}
 	*bn = BlockNumber(blckNum)
 	return nil
+}
+
+// MarshalText implements encoding.TextMarshaler. It marshals:
+// - "latest", "earliest" or "pending" as strings
+// - other numbers as hex
+func (bn BlockNumber) MarshalText() ([]byte, error) {
+	switch bn {
+	case EarliestBlockNumber:
+		return []byte("earliest"), nil
+	case LatestBlockNumber:
+		return []byte("latest"), nil
+	case PendingBlockNumber:
+		return []byte("pending"), nil
+	case AcceptedBlockNumber:
+		return []byte("accepted"), nil
+	default:
+		return hexutil.Uint64(bn).MarshalText()
+	}
 }
 
 func (bn BlockNumber) Int64() int64 {
@@ -225,4 +233,25 @@ func BlockNumberOrHashWithHash(hash common.Hash, canonical bool) BlockNumberOrHa
 		BlockHash:        &hash,
 		RequireCanonical: canonical,
 	}
+}
+
+// DecimalOrHex unmarshals a non-negative decimal or hex parameter into a uint64.
+type DecimalOrHex uint64
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (dh *DecimalOrHex) UnmarshalJSON(data []byte) error {
+	input := strings.TrimSpace(string(data))
+	if len(input) >= 2 && input[0] == '"' && input[len(input)-1] == '"' {
+		input = input[1 : len(input)-1]
+	}
+
+	value, err := strconv.ParseUint(input, 10, 64)
+	if err != nil {
+		value, err = hexutil.DecodeUint64(input)
+	}
+	if err != nil {
+		return err
+	}
+	*dh = DecimalOrHex(value)
+	return nil
 }

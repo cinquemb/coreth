@@ -92,17 +92,34 @@ type Header struct {
 	MixDigest   common.Hash    `json:"mixHash"`
 	Nonce       BlockNonce     `json:"nonce"`
 	ExtDataHash common.Hash    `json:"extDataHash"      gencodec:"required"`
+
+	// BaseFee was added by EIP-1559 and is ignored in legacy headers.
+	BaseFee *big.Int `json:"baseFeePerGas" rlp:"optional"`
+
+	// ExtDataGasUsed was added by Apricot Phase 4 and is ignored in legacy
+	// headers.
+	//
+	// It is not a uint64 like GasLimit or GasUsed because it is not possible to
+	// correctly encode this field optionally with uint64.
+	ExtDataGasUsed *big.Int `json:"extDataGasUsed" rlp:"optional"`
+
+	// BlockGasCost was added by Apricot Phase 4 and is ignored in legacy
+	// headers.
+	BlockGasCost *big.Int `json:"blockGasCost" rlp:"optional"`
 }
 
 // field type overrides for gencodec
 type headerMarshaling struct {
-	Difficulty *hexutil.Big
-	Number     *hexutil.Big
-	GasLimit   hexutil.Uint64
-	GasUsed    hexutil.Uint64
-	Time       hexutil.Uint64
-	Extra      hexutil.Bytes
-	Hash       common.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
+	Difficulty     *hexutil.Big
+	Number         *hexutil.Big
+	GasLimit       hexutil.Uint64
+	GasUsed        hexutil.Uint64
+	Time           hexutil.Uint64
+	Extra          hexutil.Bytes
+	BaseFee        *hexutil.Big
+	ExtDataGasUsed *hexutil.Big
+	BlockGasCost   *hexutil.Big
+	Hash           common.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
 }
 
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
@@ -118,27 +135,6 @@ var headerSize = common.StorageSize(reflect.TypeOf(Header{}).Size())
 func (h *Header) Size() common.StorageSize {
 	return headerSize + common.StorageSize(len(h.Extra)+(h.Difficulty.BitLen()+h.Number.BitLen())/8)
 }
-
-// Orignal code: (has been moved to syntacticVerify in plugin/evm/block.go)
-// // SanityCheck checks a few basic things -- these checks are way beyond what
-// // any 'sane' production values should hold, and can mainly be used to prevent
-// // that the unbounded fields are stuffed with junk data to add processing
-// // overhead
-// func (h *Header) SanityCheck() error {
-// 	if h.Number != nil && !h.Number.IsUint64() {
-// 		return fmt.Errorf("too large block number: bitlen %d", h.Number.BitLen())
-// 	}
-// 	if h.Difficulty != nil {
-// 		if diffLen := h.Difficulty.BitLen(); diffLen > 80 {
-// 			return fmt.Errorf("too large block difficulty: bitlen %d", diffLen)
-// 		}
-// 	}
-// 	// TODO: should assert Difficulty != nil
-// 	if eLen := len(h.Extra); eLen > 100*1024 {
-// 		return fmt.Errorf("too large block extradata: size %d", eLen)
-// 	}
-// 	return nil
-// }
 
 // EmptyBody returns true if there is no additional 'body' to complete the header
 // that is: no transactions and no uncles.
@@ -177,27 +173,7 @@ type Block struct {
 	// Td is used by package core to store the total difficulty
 	// of the chain up to and including the block.
 	td *big.Int
-
-	// Original Code:
-	// // These fields are used by package eth to track
-	// // inter-peer block relay.
-	// ReceivedAt   time.Time
-	// ReceivedFrom interface{}
 }
-
-// DeprecatedTd is an old relic for extracting the TD of a block. It is in the
-// code solely to facilitate upgrading the database from the old format to the
-// new, after which it should be deleted. Do not use!
-func (b *Block) DeprecatedTd() *big.Int {
-	return b.td
-}
-
-// Original Code:
-// // [deprecated by eth/63]
-// // StorageBlock defines the RLP encoding of a Block stored in the
-// // state database. The StorageBlock encoding contains fields that
-// // would otherwise need to be recomputed.
-// type StorageBlock Block
 
 // "external" block encoding. used for eth protocol, etc.
 type extblock struct {
@@ -207,16 +183,6 @@ type extblock struct {
 	Version uint32
 	ExtData *[]byte `rlp:"nil"`
 }
-
-// Original Code:
-// // [deprecated by eth/63]
-// // "storage" block encoding. used for database.
-// type storageblock struct {
-// 	Header *Header
-// 	Txs    []*Transaction
-// 	Uncles []*Header
-// 	TD     *big.Int
-// }
 
 // NewBlock creates a new block. The input data is copied,
 // changes to header and to the field values will not affect the
@@ -278,6 +244,15 @@ func CopyHeader(h *Header) *Header {
 	if cpy.Number = new(big.Int); h.Number != nil {
 		cpy.Number.Set(h.Number)
 	}
+	if h.BaseFee != nil {
+		cpy.BaseFee = new(big.Int).Set(h.BaseFee)
+	}
+	if h.ExtDataGasUsed != nil {
+		cpy.ExtDataGasUsed = new(big.Int).Set(h.ExtDataGasUsed)
+	}
+	if h.BlockGasCost != nil {
+		cpy.BlockGasCost = new(big.Int).Set(h.BlockGasCost)
+	}
 	if len(h.Extra) > 0 {
 		cpy.Extra = make([]byte, len(h.Extra))
 		copy(cpy.Extra, h.Extra)
@@ -329,7 +304,7 @@ func (b *Block) Version() uint32 {
 	return b.version
 }
 
-// EncodeRLP serializes b into an extended format.
+// EncodeRLP serializes b into the Ethereum RLP block format.
 func (b *Block) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, extblock{
 		Header:  b.header,
@@ -339,17 +314,6 @@ func (b *Block) EncodeRLP(w io.Writer) error {
 		ExtData: b.extdata,
 	})
 }
-
-// Original Code:
-// // [deprecated by eth/63]
-// func (b *StorageBlock) DecodeRLP(s *rlp.Stream) error {
-// 	var sb storageblock
-// 	if err := s.Decode(&sb); err != nil {
-// 		return err
-// 	}
-// 	b.header, b.uncles, b.transactions, b.td = sb.Header, sb.Uncles, sb.Txs, sb.TD
-// 	return nil
-// }
 
 // TODO: copies
 
@@ -383,6 +347,27 @@ func (b *Block) ReceiptHash() common.Hash { return b.header.ReceiptHash }
 func (b *Block) UncleHash() common.Hash   { return b.header.UncleHash }
 func (b *Block) Extra() []byte            { return common.CopyBytes(b.header.Extra) }
 
+func (b *Block) BaseFee() *big.Int {
+	if b.header.BaseFee == nil {
+		return nil
+	}
+	return new(big.Int).Set(b.header.BaseFee)
+}
+
+func (b *Block) ExtDataGasUsed() *big.Int {
+	if b.header.ExtDataGasUsed == nil {
+		return nil
+	}
+	return new(big.Int).Set(b.header.ExtDataGasUsed)
+}
+
+func (b *Block) BlockGasCost() *big.Int {
+	if b.header.BlockGasCost == nil {
+		return nil
+	}
+	return new(big.Int).Set(b.header.BlockGasCost)
+}
+
 func (b *Block) Header() *Header { return CopyHeader(b.header) }
 
 // Body returns the non-header content of the block.
@@ -399,13 +384,6 @@ func (b *Block) Size() common.StorageSize {
 	b.size.Store(common.StorageSize(c))
 	return common.StorageSize(c)
 }
-
-// Original code: (has been moved to syntacticVerify in plugin/evm/block.go)
-// // SanityCheck can be used to prevent that unbounded fields are
-// // stuffed with junk data to add processing overhead
-// func (b *Block) SanityCheck() error {
-// 	return b.header.SanityCheck()
-// }
 
 type writeCounter common.StorageSize
 
