@@ -30,7 +30,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ava-labs/coreth/core/aclock"

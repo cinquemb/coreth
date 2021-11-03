@@ -1227,69 +1227,8 @@ Error: %v
 `, bc.chainConfig, block.Number(), block.Hash(), receiptString, err))
 }
 
-<<<<<<< HEAD
-// Original Code:
-// // InsertHeaderChain attempts to insert the given header chain in to the local
-// // chain, possibly creating a reorg. If an error is returned, it will return the
-// // index number of the failing header as well an error describing what went wrong.
-// //
-// // The verify parameter can be used to fine tune whether nonce verification
-// // should be done or not. The reason behind the optional check is because some
-// // of the header retrieval mechanisms already need to verify nonces, as well as
-// // because nonces can be verified sparsely, not needing to check each.
-// func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (int, error) {
-// 	start := aclock.Now()
-// 	if i, err := bc.hc.ValidateHeaderChain(chain, checkFreq); err != nil {
-// 		return i, err
-// 	}
-//
-// 	// Make sure only one thread manipulates the chain at once
-// 	bc.chainmu.Lock()
-// 	defer bc.chainmu.Unlock()
-//
-// 	bc.wg.Add(1)
-// 	defer bc.wg.Done()
-//
-// 	whFunc := func(header *types.Header) error {
-// 		_, err := bc.hc.WriteHeader(header)
-// 		return err
-// 	}
-// 	return bc.hc.InsertHeaderChain(chain, whFunc, start)
-// }
-
-// CurrentHeader retrieves the current head header of the canonical chain. The
-// header is retrieved from the HeaderChain's internal cache.
-func (bc *BlockChain) CurrentHeader() *types.Header {
-	return bc.hc.CurrentHeader()
-}
-
-// GetTd retrieves a block's total difficulty in the canonical chain from the
-// database by hash and number, caching it if found.
-func (bc *BlockChain) GetTd(hash common.Hash, number uint64) *big.Int {
-	return bc.hc.GetTd(hash, number)
-}
-
-// GetTdByHash retrieves a block's total difficulty in the canonical chain from the
-// database by hash, caching it if found.
-func (bc *BlockChain) GetTdByHash(hash common.Hash) *big.Int {
-	return bc.hc.GetTdByHash(hash)
-}
-
-// GetHeader retrieves a block header from the database by hash and number,
-// caching it if found.
-func (bc *BlockChain) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return bc.hc.GetHeader(hash, number)
-}
-
-// GetHeaderByHash retrieves a block header from the database by hash, caching it if
-// found.
-func (bc *BlockChain) GetHeaderByHash(hash common.Hash) *types.Header {
-	return bc.hc.GetHeaderByHash(hash)
-}
-=======
 func (bc *BlockChain) RemoveRejectedBlocks(start, end uint64) error {
 	batch := bc.db.NewBatch()
->>>>>>> 91b6f7b4329a43cb3a595f6707502b9dcfa00e19
 
 	for i := start; i < end; i++ {
 		hashes := rawdb.ReadAllHashes(bc.db, i)

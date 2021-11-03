@@ -34,7 +34,6 @@ import (
 
 	mapset "github.com/deckarep/golang-set"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ava-labs/coreth/core/aclock"
 )
 
 const MetadataApi = "rpc"

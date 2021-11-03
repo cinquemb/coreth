@@ -69,7 +69,7 @@ type IssueBlockArgs struct {}
 // IssueBlock to the chain
 func (service *AvaxAPI) IssueBlock(r *http.Request, args *IssueBlockArgs, reply *IssueBlockReply) error {
 	log.Info("Issuing a new block")
-	service.vm.signalTxsReady()
+	service.vm.builder.signalTxsReady()
 
 	return nil
 }
